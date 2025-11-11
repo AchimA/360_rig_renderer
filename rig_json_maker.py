@@ -27,52 +27,81 @@ class COLMAP_RIG_OT_export(Operator):
     bl_label = 'Export rig JSON for COLMAP'
     bl_description = 'Export rigs (collections) as COLMAP rig JSON'
 
-    # popup directory selector (defaults to blend file folder when possible)
-    filepath = StringProperty(
-        name="Output Path",
+# --- 1. Define properties for the FileBrowser ---
+    # The filepath property is what the file browser uses to return the selected path
+    filepath: bpy.props.StringProperty(
+        name="File Path",
         description="Folder to write rig_config.json",
-        default="",
-        subtype='DIR_PATH',
+        subtype='FILE_PATH',
     )
 
+    # This is a dummy property to correctly open the file browser
+    # The name is important: 'files', 'file_name', etc.
+    # The file browser will automatically use this to set the default file name.
+    filename: bpy.props.StringProperty(
+        name="File Name",
+        description="*.json file name",
+        default="export.json", # --- 3. Default file name
+        maxlen=1024,
+    )
+
+    # --- 3. Filter for .json files
+    filter_glob: bpy.props.StringProperty(
+        default="*.json", # Always enforce .txt extension
+        options={'HIDDEN'},
+        maxlen=255,
+    )
+
+
     def invoke(self, context, event):
-        # set a sensible default for the popup: directory of current .blend file
-        if not self.filepath:
-            blend_path = bpy.data.filepath
-            if blend_path:
-                import os
-                self.filepath = os.path.dirname(blend_path)
-        # open Blender's file browser (folder selection). fileselect_add expects
-        # the operator to return {'RUNNING_MODAL'} and will call `execute`
-        # when the user confirms the selection.
-        context.window_manager.fileselect_add(self)
+         # Set the initial directory for the file browser
+        if bpy.data.filepath:
+            # If blend file is saved, start in its directory
+            self.filepath = os.path.dirname(bpy.data.filepath)
+        else:
+            # If not saved, start in user's home directory or a common default
+            # For cross-platform, os.path.expanduser('~') is a good choice for home dir
+            self.filepath = os.path.expanduser('~') # Or a specific default like "C:\\temp" or "/tmp"
+
+        # Set the default filename *before* invoking the file browser
+        self.filename = "rig_config.json" # Ensure default is set every time
+
+        # Open the file browser. The 'INVOKE_DEFAULT' means show the dialog.
+        # context.window_manager.fileselect_report(self)
+        return context.window_manager.invoke_props_dialog(self, width=800)
+        # context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
     def execute(self, context):
         scene = context.scene
         # chosen path from popup takes precedence; fall back to scene property
-        out_path = bpy.path.abspath(self.filepath or getattr(scene, 'colmap_rig_output_path', '') or "")
+        # full_filepath = os.path.join(self.filepath, self.filename)
+        out_path = bpy.path.abspath(self.filepath)
         rigs = []
         depsgraph = context.evaluated_depsgraph_get()
 
 
         for coll in bpy.data.collections:
-            # collect visible cameras in this collection
-            cams = [obj for obj in coll.objects
-            if obj.type == 'CAMERA' and not obj.hide_render and not obj.hide_viewport]
+            # skip collections if it's deactivaed
+            # if  not (coll.exclude or coll.hide_viewport or coll.hide_render):
+            #     continue
 
+            # collect visible cameras in this collection
+            cams = [
+                obj
+                for obj
+                in coll.objects
+                if obj.type == 'CAMERA' and not obj.hide_render and not obj.hide_viewport
+                ]
 
             if not cams:
                 continue
-
 
             # choose reference camera (first visible). User can modify later if needed.
             ref_cam = cams[0]
             M_ref = _get_evaluated_matrix(ref_cam, depsgraph)
 
-
             rig_entry = {"cameras": []}
-
 
             for cam in cams:
                 M_cam = _get_evaluated_matrix(cam, depsgraph)

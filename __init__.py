@@ -4,7 +4,7 @@ import bpy
 import importlib
 
 module_names = (
-    'ig_json_maker',
+    'rig_json_maker',
     'renderer',
     'ui',
     )

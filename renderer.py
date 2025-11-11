@@ -7,7 +7,7 @@ from bpy.props import StringProperty
 class COLMAP_RIG_OT_render(Operator):
     bl_idname = 'colmap_rig.render'
     bl_label = 'Render all rigs to folders'
-    bl_description = 'Render frames for every visible camera in each collection into the COLMAP folder layout'
+    bl_description = '[To be implemented...] Render frames for every visible camera in each collection into the COLMAP folder layout'
 
     # popup directory selector (defaults to blend file folder when possible)
     filepath = StringProperty(

@@ -21,10 +21,18 @@ class COLMAP_RIG_PT_panel(bpy.types.Panel):
             layout.prop(scene, 'colmap_rig_zero_pad')
 
         row = layout.row()
-        row.operator('colmap_rig.export', text='Export rig JSON')
+        row.operator(
+            'colmap_rig.export',
+             text='Export rig JSON',
+            icon='OUTLINER'
+             )
         row = layout.row()
-        row.operator('colmap_rig.render', text='Render all rigs')
-        # row.enabled = False
+        row.operator(
+            'colmap_rig.render',
+            text='Render all rigs',
+            icon='SCENE',
+            )
+        row.enabled = False
 
 
 classes = (
