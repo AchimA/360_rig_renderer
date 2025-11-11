@@ -17,13 +17,6 @@ def register_properties():
     from bpy.props import StringProperty, EnumProperty, IntProperty
 
     # register properties only if they don't already exist
-    if not hasattr(bpy.types.Scene, 'colmap_rig_output_path'):
-        bpy.types.Scene.colmap_rig_output_path = StringProperty(
-        name="COLMAP Output Path",
-        description="Output folder for rig JSON and images",
-        default="",
-        subtype='DIR_PATH',
-    )
 
     if not hasattr(bpy.types.Scene, 'colmap_rig_image_format'):
         bpy.types.Scene.colmap_rig_image_format = EnumProperty(
@@ -48,7 +41,6 @@ def register_properties():
 
 def unregister_properties():
     for name in (
-        'colmap_rig_output_path',
         'colmap_rig_image_format',
         'colmap_rig_zero_pad',
     ):

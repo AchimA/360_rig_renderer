@@ -87,11 +87,12 @@ class COLMAP_RIG_OT_export(Operator):
             #     continue
 
             # collect visible cameras in this collection
+            # only include cameras that are visible in both render and viewport
             cams = [
                 obj
                 for obj
                 in coll.objects
-                if obj.type == 'CAMERA' and not obj.hide_render and not obj.hide_viewport
+                if obj.type == 'CAMERA' and (not obj.hide_render and not obj.hide_viewport)
                 ]
 
             if not cams:
