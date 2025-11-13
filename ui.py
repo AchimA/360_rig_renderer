@@ -13,8 +13,8 @@ class COLMAP_RIG_PT_panel(bpy.types.Panel):
         scene = context.scene
 
         # scene properties (registered in __init__.py)
-        if hasattr(scene, 'colmap_rig_image_format'):
-            layout.prop(scene, 'colmap_rig_image_format')
+        # if hasattr(scene, 'colmap_rig_image_format'):
+        #     layout.prop(scene, 'colmap_rig_image_format')
         if hasattr(scene, 'colmap_rig_zero_pad'):
             layout.prop(scene, 'colmap_rig_zero_pad')
 
@@ -37,6 +37,9 @@ classes = (
     COLMAP_RIG_PT_panel,
 )
 
+###########################################################################
+######################### Register Modules ################################
+###########################################################################
 
 def register():
     for cls in classes:

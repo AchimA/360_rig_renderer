@@ -6,6 +6,7 @@ import importlib
 module_names = (
     'rig_json_maker',
     'renderer',
+    'rig_manager',
     'ui',
     )
 
