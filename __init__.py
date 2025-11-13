@@ -4,9 +4,9 @@ import bpy
 import importlib
 
 module_names = (
+    'rig_manager',
     'rig_json_maker',
     'renderer',
-    'rig_manager',
     'ui',
     )
 
