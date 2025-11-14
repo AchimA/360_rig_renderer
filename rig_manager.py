@@ -1,7 +1,7 @@
 #rig_manager.py
 import bpy
 import os
-
+import math
 
 # Rig Item Property Group
 class RigItem(bpy.types.PropertyGroup):
@@ -11,7 +11,13 @@ class RigItem(bpy.types.PropertyGroup):
         )
     name: bpy.props.StringProperty(
     name = 'Rig Name',
-    default = 'Rig ###'
+    default = 'Rig ###',
+    update = lambda self, context: update_world_name(self, context)
+    )
+    sel_cam_active: bpy.props.BoolProperty(
+        name = 'Activate Selected Camera',
+        description = 'Automatically set the selected camera as the active scene camera',
+        default = True
     )
     # Pointer to the managed collection in the scene
     collection: bpy.props.PointerProperty(
@@ -24,44 +30,71 @@ class RigItem(bpy.types.PropertyGroup):
         name = 'Source Path',
         subtype = 'FILE_PATH', # Gives it a file browser icon in the UI
         description = 'Path to the Movie Clip or Image Sequence',
-        default = ''
+        default = '',
+        update = lambda self, context: update_media_info(self, context)
     )
-    # Type of source selected
-    source_type: bpy.props.EnumProperty(
+    # Auto-detected source type (read-only)
+    source_type: bpy.props.StringProperty(
         name = 'Source Type',
-        items = [
-            ('MOVIE_CLIP', 'Movie Clip', 'A single movie file'),
-            ('IMAGE_SEQUENCE', 'Image Sequence', 'A sequence of image files (e.g., EXR, PNG)'),
-            ('DUMMY_RIG', 'Dummy Rig', 'A placeholder rig without media'),
-        ],
-        description='Type of media being used'
+        default = 'Unknown',
+        description='Auto-detected media type'
     )
     media_frame_count: bpy.props.IntProperty(
         name = 'Media Frame Count',
-        default = 100,
-        min = 1
+        default = 0,
+        min = 0,
     )
     # Rendering parameters
     start_frame: bpy.props.IntProperty(
         name = 'Start Frame',
         default = 1,
-        min = 1
+        min = 1,
+        update = lambda self, context: sync_frame_range_to_scene(self, context)
     )
     end_frame: bpy.props.IntProperty(
         name = 'End Frame',
         default = 250,
-        min = 1
+        min = 1,
+        update = lambda self, context: sync_frame_range_to_scene(self, context)
     )
     frame_step: bpy.props.IntProperty(
         name = 'Frame Step',
         default = 10,
-        min = 1
+        min = 1,
+        update = lambda self, context: sync_frame_range_to_scene(self, context)
+    )
+    num_cameras: bpy.props.IntProperty(
+        name = 'Number of Cameras',
+        default = 0,
+        min = 0
+    )
+    # Boolean toggles for workflow
+    include_in_yaml: bpy.props.BoolProperty(
+        name = 'Include in YAML',
+        description = 'Include this rig in the exported YAML config',
+        default = True
+    )
+    do_render: bpy.props.BoolProperty(
+        name = 'Render',
+        description = 'Include this rig in batch rendering',
+        default = True
     )
 
 
 ###########################################################################
 ### Helper Functions #####################################################
 ###########################################################################
+
+def sync_frame_range_to_scene(rig_item, context):
+    """Update scene frame range when rig item frame properties change (if it's the active rig)."""
+    scene = context.scene
+    if hasattr(scene, 'rig_collection') and hasattr(scene, 'rig_index'):
+        if 0 <= scene.rig_index < len(scene.rig_collection):
+            if scene.rig_collection[scene.rig_index] == rig_item:
+                # This is the active rig, update scene timeline
+                scene.frame_start = rig_item.start_frame
+                scene.frame_end = rig_item.end_frame
+                scene.frame_step = rig_item.frame_step
 
 def ensure_rig_config_collection():
     """Ensure the 'rig_config' parent collection exists and is linked to the scene."""
@@ -88,10 +121,7 @@ def remove_rig_collection(rig_item):
     """Remove the collection associated with the rig_item."""
     if rig_item.collection:
         coll = rig_item.collection
-        # Unlink from all parents and remove
-        for parent in coll.users_scene:
-            parent.collection.children.unlink(coll)
-        # Also unlink from rig_config if present
+        # Unlink from rig_config parent if present
         if 'rig_config' in bpy.data.collections:
             parent_coll = bpy.data.collections['rig_config']
             if coll.name in parent_coll.children:
@@ -100,10 +130,265 @@ def remove_rig_collection(rig_item):
         bpy.data.collections.remove(coll)
         rig_item.collection = None
 
-def sync_collection_name(rig_item):
-    """Sync the collection name with the rig_item name (called when user changes name)."""
-    if rig_item.collection and rig_item.collection.name != rig_item.name:
-        rig_item.collection.name = rig_item.name
+def create_or_update_world_material(rig_item):
+    """Create or update world material with environment texture for the rig."""
+    world_name = f"World_{rig_item.name}"
+    
+    # Get or create world
+    if world_name in bpy.data.worlds:
+        world = bpy.data.worlds[world_name]
+    else:
+        world = bpy.data.worlds.new(world_name)
+    
+    # Enable nodes
+    world.use_nodes = True
+    nodes = world.node_tree.nodes
+    links = world.node_tree.links
+    
+    # Clear existing nodes
+    nodes.clear()
+    
+    # Create nodes
+    tex_coord = nodes.new(type='ShaderNodeTexCoord')
+    tex_coord.location = (0, 0)
+    
+    mapping = nodes.new(type='ShaderNodeMapping')
+    mapping.location = (200, 0)
+    # Rotate environment by 90 degrees around Z
+    mapping.inputs['Rotation'].default_value = (0.0, 0.0, math.radians(90.0))
+    
+    env_tex = nodes.new(type='ShaderNodeTexEnvironment')
+    env_tex.location = (400, 0)
+    
+    # Set image/movie if filepath exists
+    if rig_item.source_filepath and rig_item.source_filepath.strip():
+        try:
+            # Load image or movie - always load to ensure we have the latest
+            img = bpy.data.images.load(rig_item.source_filepath, check_existing=True)
+            
+            # Set image source type BEFORE assigning to texture
+            if rig_item.source_type == 'Movie Clip':
+                img.source = 'MOVIE'
+            elif rig_item.source_type == 'Image Sequence':
+                img.source = 'SEQUENCE'
+            else:
+                img.source = 'FILE'
+            
+            # Assign image to texture
+            env_tex.image = img
+            
+            # Configure image_user for animated textures
+            if rig_item.source_type in ['Movie Clip', 'Image Sequence']:
+                env_tex.image_user.use_auto_refresh = True
+                env_tex.image_user.use_cyclic = False
+                env_tex.image_user.frame_start = 1
+                if rig_item.media_frame_count > 0:
+                    env_tex.image_user.frame_duration = rig_item.media_frame_count
+                    env_tex.image_user.frame_offset = 0
+            
+        except Exception as e:
+            print(f"Error loading image for world material: {e}")
+    
+    background = nodes.new(type='ShaderNodeBackground')
+    background.location = (600, 0)
+    
+    output = nodes.new(type='ShaderNodeOutputWorld')
+    output.location = (800, 0)
+    
+    # Create links
+    links.new(tex_coord.outputs['Generated'], mapping.inputs['Vector'])
+    links.new(mapping.outputs['Vector'], env_tex.inputs['Vector'])
+    links.new(env_tex.outputs['Color'], background.inputs['Color'])
+    links.new(background.outputs['Background'], output.inputs['Surface'])
+    
+    return world
+
+def remove_world_material(rig_item):
+    """Remove the world material associated with the rig_item."""
+    world_name = f"World_{rig_item.name}"
+    if world_name in bpy.data.worlds:
+        world = bpy.data.worlds[world_name]
+        bpy.data.worlds.remove(world)
+
+def update_world_name(rig_item, context):
+    """Rename the world material when rig name changes."""
+    # Find world with old name pattern - search for any world starting with "World_"
+    # that might belong to this rig (we can't know the old name)
+    # Better approach: store the world reference or search by ID
+    # For now, we'll use a simpler approach: find world that doesn't match any current rig name
+    
+    scene = context.scene
+    new_world_name = f"World_{rig_item.name}"
+    
+    # If world with new name already exists, we're done
+    if new_world_name in bpy.data.worlds:
+        return
+    
+    # Find worlds that start with "World_" but don't match any current rig name
+    current_rig_world_names = {f"World_{item.name}" for item in scene.rig_collection}
+    
+    for world in bpy.data.worlds:
+        if world.name.startswith("World_") and world.name not in current_rig_world_names:
+            # Found an orphaned world - rename it to match this rig
+            world.name = new_world_name
+            break
+
+def update_media_info(rig_item, context):
+    """Auto-detect media type and update frame count when source_filepath changes."""
+    import pathlib
+    import re
+    
+    filepath = rig_item.source_filepath
+    if not filepath:
+        rig_item.source_type = 'Unknown'
+        rig_item.media_frame_count = 0
+        return
+    
+    path = pathlib.Path(filepath)
+    
+    # Valid extensions
+    MOVIE_EXTS = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.m4v', '.mpeg', '.mpg'}
+    IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.exr', '.tif', '.tiff', '.bmp', '.tga', '.dpx'}
+    
+    if not path.exists():
+        print(f"Warning: File does not exist: {filepath}")
+        rig_item.source_type = 'File not found'
+        return
+    
+    ext = path.suffix.lower()
+    
+    # Auto-detect type based on extension
+    if ext in MOVIE_EXTS:
+        rig_item.source_type = 'Movie Clip'
+        
+        # Try to get movie clip frame count
+        try:
+            # Load movie clip temporarily to get frame count
+            clip = bpy.data.movieclips.load(filepath)
+            frame_count = clip.frame_duration
+            bpy.data.movieclips.remove(clip)
+            
+            rig_item.media_frame_count = frame_count
+            rig_item.end_frame = frame_count
+            print(f"Movie clip loaded: {frame_count} frames")
+        except Exception as e:
+            print(f"Error loading movie clip: {e}")
+    
+    elif ext in IMAGE_EXTS:
+        # For image sequences, count files with frame numbers in the same directory
+        parent = path.parent
+        stem = path.stem
+        
+        # Try to detect sequence pattern (e.g., image_0001.png -> image_####.png)
+        match = re.match(r'(.+?)(\d+)$', stem)
+        if match:
+            rig_item.source_type = 'Image Sequence'
+            base_name, frame_num = match.groups()
+            pad_length = len(frame_num)
+            
+            # Count files matching pattern
+            count = 0
+            for file in parent.glob(f"{base_name}*{ext}"):
+                if re.match(rf'{re.escape(base_name)}\d{{{pad_length}}}{re.escape(ext)}$', file.name):
+                    count += 1
+            
+            if count > 0:
+                rig_item.media_frame_count = count
+                rig_item.end_frame = count
+                print(f"Image sequence detected: {count} frames")
+        else:
+            rig_item.source_type = 'Single Image'
+            rig_item.media_frame_count = 1
+            rig_item.end_frame = 1
+    else:
+        rig_item.source_type = 'Unknown format'
+        print(f"Warning: Unsupported file extension '{ext}'")
+    
+    # Create or update world material with the media
+    create_or_update_world_material(rig_item)
+
+def update_collection_visibility(scene):
+    """Show only the active rig collection in viewport, hide all others, and set it as active."""
+    if not hasattr(scene, 'rig_collection') or not hasattr(scene, 'rig_index'):
+        return
+    
+    idx = scene.rig_index
+    if idx < 0 or idx >= len(scene.rig_collection):
+        return
+    
+    # Get the active rig item
+    active_item = scene.rig_collection[idx]
+    
+    # Update visibility for all rig collections
+    for i, item in enumerate(scene.rig_collection):
+        if item.collection and item.collection.name in bpy.data.collections:
+            coll = item.collection
+            # Show only the active collection
+            coll.hide_viewport = (i != idx)
+            
+            # Set the active collection in the view layer and activate first camera
+            if i == idx:
+                try:
+                    bpy.context.view_layer.active_layer_collection = bpy.context.view_layer.layer_collection.children['rig_config'].children[coll.name]
+                except (KeyError, AttributeError):
+                    pass  # Collection not found in view layer hierarchy
+                
+                # Set first camera in collection as active scene camera
+                cameras = [obj for obj in coll.objects if obj.type == 'CAMERA']
+                if cameras:
+                    scene.camera = cameras[-1]
+                
+                # Switch world material to this rig's world
+                world_name = f"World_{item.name}"
+                if world_name in bpy.data.worlds:
+                    scene.world = bpy.data.worlds[world_name]
+                
+                # Set all 3D viewports to RENDERED shading mode
+                for window in bpy.context.window_manager.windows:
+                    for area in window.screen.areas:
+                        if area.type == 'VIEW_3D':
+                            for space in area.spaces:
+                                if space.type == 'VIEW_3D':
+                                    space.shading.type = 'RENDERED'
+                
+                # Update timeline and render settings from active rig item
+                scene.frame_start = item.start_frame
+                scene.frame_end = item.end_frame
+                scene.frame_step = item.frame_step
+
+
+@bpy.app.handlers.persistent
+def update_collection_num_cameras(scene):
+    """
+    executed when appending or removing items from the rig_collection
+    """
+
+    for i, item in enumerate(scene.rig_collection):
+        if item.collection and item.collection.name in bpy.data.collections:
+            coll = item.collection
+    
+        num_cams = len([obj for obj in item.collection.objects if obj.type == 'CAMERA'])
+        item.num_cameras = num_cams
+
+@bpy.app.handlers.persistent
+def selected_camera_to_active(scene):
+    if scene.sel_cam_active and bpy.context.object is not None and bpy.context.object.type == 'CAMERA':
+        scene.camera = bpy.context.object
+
+@bpy.app.handlers.persistent
+def rebuild_world_materials_on_load(dummy):
+    """Rebuild all world materials when file is loaded to ensure textures are properly reloaded."""
+    try:
+        scene = bpy.context.scene
+        if hasattr(scene, 'rig_collection'):
+            for item in scene.rig_collection:
+                if item.source_filepath and item.source_filepath.strip():
+                    create_or_update_world_material(item)
+            print(f"Rebuilt {len(scene.rig_collection)} world materials on file load")
+    except Exception as e:
+        print(f"Error rebuilding world materials on load: {e}")
+    
+
 
 ###########################################################################
 ### Operators #############################################################
@@ -148,15 +433,19 @@ class RIG_OT_actions(bpy.types.Operator):
 
             elif self.action == 'REMOVE':
                 info = 'Item {:s} removed from list'.format(scn.rig_collection[idx].name)
-                # Remove the managed collection before removing the item
+                # Remove the managed collection and world material before removing the item
                 remove_rig_collection(item)
-                scn.rig_index -= 1
+                remove_world_material(item)
                 scn.rig_collection.remove(idx)
+                # Keep index valid: if we removed the last item, select the new last item
+                if idx >= len(scn.rig_collection) and len(scn.rig_collection) > 0:
+                    scn.rig_index = len(scn.rig_collection) - 1
+                else:
+                    scn.rig_index = max(0, idx)
                 self.report({'INFO'}, info)
 
         if self.action == 'ADD':
             item = scn.rig_collection.add()
-            # item.obj_type = context.object.type
             item.ID = scn.max_rig_ID
             item.name = 'Rig_{:d}'.format(scn.max_rig_ID)
             scn.rig_index = len(scn.rig_collection)-1
@@ -170,6 +459,9 @@ class RIG_OT_actions(bpy.types.Operator):
 
             # Create the managed collection for this rig
             create_rig_collection(item)
+            
+            # Create world material for this rig
+            create_or_update_world_material(item)
 
             scn.max_rig_ID += 1
 
@@ -184,17 +476,23 @@ class RIG_OT_actions(bpy.types.Operator):
 
 class RIG_UL_LIST(bpy.types.UIList):
     '''
-    RIG_LIST
+    RIG_LIST - Multi-column layout with inline boolean toggles
     '''
 
     def draw_item(self, context, layout, data, item, icon, active_data,
                   active_propname, index):
 
-        # Set Icon
-        custom_icon = 'COLLECTION_COLOR_02'
-
         if self.layout_type in {'DEFAULT', 'COMPACT'}:
-            layout.label(text=f'ID{item.ID:2d} | {item.name}', icon = custom_icon)
+            # Multi-column layout
+            row = layout.row(align=True)
+            
+            row.prop(item, 'name', text='', emboss=False)
+
+            row.prop(item, 'num_cameras', text='', icon='CAMERA_DATA', emboss=False)
+            row.label(text=str(item.num_cameras), icon='CAMERA_DATA')
+
+            row.prop(item, 'include_in_yaml', text='', icon='COPYDOWN' if item.include_in_yaml else 'X', emboss=True)
+            row.prop(item, 'do_render', text='', icon='RESTRICT_RENDER_OFF' if item.do_render else 'RESTRICT_RENDER_ON', emboss=True)
 
         elif self.layout_type in {'GRID'}:
             layout.alignment = 'CENTER'
@@ -202,6 +500,7 @@ class RIG_UL_LIST(bpy.types.UIList):
 
     def invoke(self, context, event):
         pass
+
 
 class UIListPanelRigCollection(bpy.types.Panel):
     '''Creates a Panel in the Object properties window'''
@@ -215,14 +514,12 @@ class UIListPanelRigCollection(bpy.types.Panel):
         layout = self.layout
         scene = context.scene
         obj = context.object
-
+        
         row = layout.row()
-        row.label(text='test 1')
-
-        ##########
+        row.prop(scene, 'sel_cam_active', text='Auto-activate selected camera', icon='FILE_REFRESH')
+        ######## Rig Collection List ########
         rows = 2
         row = layout.row()
-        # row.template_list('CUSTOM_UL_items', '', scn, 'custom', scn, 'rig_index', rows=rows)
         row.template_list('RIG_UL_LIST', 'a list', scene, 'rig_collection', scene, 'rig_index', rows=rows)
 
         col = row.column(align=True)
@@ -231,52 +528,35 @@ class UIListPanelRigCollection(bpy.types.Panel):
         col.separator()
         col.operator('object.rig_action', icon='TRIA_UP', text='').action = 'UP'
         col.operator('object.rig_action', icon='TRIA_DOWN', text='').action = 'DOWN'
-        #######
+        #####################################
 
-        
+        layout.separator()
         row = layout.row()
         row.label(text='Rig Settings:')
         row = layout.row()
         # show editable fields for the currently selected rig item
         idx = scene.rig_index if hasattr(scene, 'rig_index') else 0
+
         if len(scene.rig_collection) > 0 and 0 <= idx < len(scene.rig_collection):
             item = scene.rig_collection[idx]
             box = layout.box()
             box.label(text=f'Selected: {item.name}')
+            row = box.row()
+            row.label(text='Type: {:s}'.format(item.source_type), icon='FILE_MOVIE')
+            row.label(text='Frames: {:d}'.format(item.media_frame_count), icon='MOD_TIME')
+            row.label(text='Cameras: {:d}'.format(item.num_cameras), icon='CAMERA_DATA')
+
             box.prop(item, 'name')
-            box.prop(item, 'source_type')
             box.prop(item, 'source_filepath')
-            box.prop(item, 'media_frame_count')
             row = box.row()
             row.prop(item, 'start_frame')
             row.prop(item, 'end_frame')
-            box.prop(item, 'frame_step')
+            row = box.row()
+            row.prop(item, 'frame_step')
+
+
         else:
             layout.label(text='No rigs in list')
-
-###########################################################################
-### Collection Protection (Depsgraph Handler) ############################
-###########################################################################
-
-@bpy.app.handlers.persistent
-def protect_managed_collections(scene, depsgraph):
-    """Revert any user changes to managed collections (name, visibility, parent)."""
-    # Check if rig_config exists
-    if 'rig_config' not in bpy.data.collections:
-        return
-    
-    parent_coll = bpy.data.collections['rig_config']
-    
-    # Iterate through all rig items and ensure their collections are protected
-    for item in scene.rig_collection:
-        if item.collection:
-            coll = item.collection
-            # Sync name if user changed it
-            if coll.name != item.name:
-                coll.name = item.name
-            # Note: Blender doesn't allow preventing collection renames/moves via API alone.
-            # A more robust solution would use msgbus subscriptions or check on every depsgraph update.
-            # For now, we sync the name back on depsgraph updates.
 
 ###########################################################################
 ### Register Modules ######################################################
@@ -294,24 +574,34 @@ def register():
         bpy.utils.register_class(cls)
     
     bpy.types.Scene.rig_collection = bpy.props.CollectionProperty(type=RigItem)
-    bpy.types.Scene.rig_index = bpy.props.IntProperty(name='Rig Index', default=0)
+    bpy.types.Scene.rig_index = bpy.props.IntProperty(
+        name='Rig Index', 
+        default=0,
+        update=lambda self, context: update_collection_visibility(context.scene)
+    )
     bpy.types.Scene.max_rig_ID = bpy.props.IntProperty(name='max. Rig ID', default=0)
-    
-    # Register depsgraph handler to protect managed collections
-    if protect_managed_collections not in bpy.app.handlers.depsgraph_update_post:
-        bpy.app.handlers.depsgraph_update_post.append(protect_managed_collections)
-    
+    bpy.types.Scene.sel_cam_active = bpy.props.BoolProperty(
+        name='Auto-activate Selected Camera',
+        description='Automatically set the selected camera as the active scene camera',
+        default=True
+    )
+
+    bpy.app.handlers.depsgraph_update_post.append(update_collection_num_cameras)
+    bpy.app.handlers.depsgraph_update_post.append(selected_camera_to_active)
+    bpy.app.handlers.load_post.append(rebuild_world_materials_on_load)
+
     # Ensure rig_config collection exists on register
     ensure_rig_config_collection()
 
 def unregister():
-    # Remove depsgraph handler
-    if protect_managed_collections in bpy.app.handlers.depsgraph_update_post:
-        bpy.app.handlers.depsgraph_update_post.remove(protect_managed_collections)
-    
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
     
     del bpy.types.Scene.rig_collection
     del bpy.types.Scene.rig_index
     del bpy.types.Scene.max_rig_ID
+    del bpy.types.Scene.sel_cam_active
+
+    bpy.app.handlers.depsgraph_update_post.remove(update_collection_num_cameras)
+    bpy.app.handlers.depsgraph_update_post.remove(selected_camera_to_active)
+    bpy.app.handlers.load_post.remove(rebuild_world_materials_on_load)

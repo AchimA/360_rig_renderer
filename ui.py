@@ -21,7 +21,7 @@ class COLMAP_RIG_PT_panel(bpy.types.Panel):
         row = layout.row()
         row.operator(
             'colmap_rig.export',
-             text='Export rig JSON',
+            text='Export rig JSON',
             icon='OUTLINER'
              )
         row = layout.row()
