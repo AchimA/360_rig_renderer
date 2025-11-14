@@ -2,8 +2,8 @@
 import bpy
 
 class COLMAP_RIG_PT_panel(bpy.types.Panel):
-    bl_idname = "COLMAP_RIG_PT_panel"
-    bl_label = "COLMAP Rig Exporter"
+    bl_idname = 'COLMAP_RIG_PT_panel'
+    bl_label = 'COLMAP Rig Exporter'
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'COLMAP Rig Exp.'

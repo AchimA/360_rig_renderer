@@ -7,7 +7,7 @@ from bpy.props import StringProperty
 
 
 def _get_evaluated_matrix(obj, depsgraph):
-    """Return the evaluated world matrix for an object using the depsgraph."""
+    '''Return the evaluated world matrix for an object using the depsgraph.'''
     obj_eval = obj.evaluated_get(depsgraph)
     # ensure we return a copy to avoid mutating Blender's internal data
     return obj_eval.matrix_world.copy()
@@ -30,8 +30,8 @@ class COLMAP_RIG_OT_export(Operator):
 # --- 1. Define properties for the FileBrowser ---
     # The filepath property is what the file browser uses to return the selected path
     filepath: bpy.props.StringProperty(
-        name="File Path",
-        description="Folder to write rig_config.json",
+        name='File Path',
+        description='Folder to write rig_config.json',
         subtype='FILE_PATH',
     )
 
@@ -39,15 +39,15 @@ class COLMAP_RIG_OT_export(Operator):
     # The name is important: 'files', 'file_name', etc.
     # The file browser will automatically use this to set the default file name.
     filename: bpy.props.StringProperty(
-        name="File Name",
-        description="*.json file name",
-        default="export.json", # --- 3. Default file name
+        name='File Name',
+        description='*.json file name',
+        default='export.json', # --- 3. Default file name
         maxlen=1024,
     )
 
     # --- 3. Filter for .json files
     filter_glob: bpy.props.StringProperty(
-        default="*.json", # Always enforce .txt extension
+        default='*.json', # Always enforce .txt extension
         options={'HIDDEN'},
         maxlen=255,
     )
@@ -61,10 +61,10 @@ class COLMAP_RIG_OT_export(Operator):
         else:
             # If not saved, start in user's home directory or a common default
             # For cross-platform, os.path.expanduser('~') is a good choice for home dir
-            self.filepath = os.path.expanduser('~') # Or a specific default like "C:\\temp" or "/tmp"
+            self.filepath = os.path.expanduser('~') # Or a specific default like 'C:\\temp' or '/tmp'
 
         # Set the default filename *before* invoking the file browser
-        self.filename = "rig_config.json" # Ensure default is set every time
+        self.filename = 'rig_config.json' # Ensure default is set every time
 
         # Open the file browser. The 'INVOKE_DEFAULT' means show the dialog.
         # context.window_manager.fileselect_report(self)
@@ -102,7 +102,7 @@ class COLMAP_RIG_OT_export(Operator):
             ref_cam = cams[0]
             M_ref = _get_evaluated_matrix(ref_cam, depsgraph)
 
-            rig_entry = {"cameras": []}
+            rig_entry = {'cameras': []}
 
             for cam in cams:
                 M_cam = _get_evaluated_matrix(cam, depsgraph)
@@ -111,19 +111,19 @@ class COLMAP_RIG_OT_export(Operator):
 
                 if cam == ref_cam:
                     cam_entry = {
-                    "image_prefix": f"{coll.name}/{cam.name}/",
-                    "ref_sensor": True
+                    'image_prefix': f'{coll.name}/{cam.name}/',
+                    'ref_sensor': True
                     }
                 else:
                     quat, trans = _matrix_to_colmap_quat_trans(T_cam_ref)
                     cam_entry = {
-                    "image_prefix": f"{coll.name}/{cam.name}/",
-                    "cam_from_rig_rotation": quat,
-                    "cam_from_rig_translation": trans
+                    'image_prefix': f'{coll.name}/{cam.name}/',
+                    'cam_from_rig_rotation': quat,
+                    'cam_from_rig_translation': trans
                     }
 
 
-                rig_entry["cameras"].append(cam_entry)
+                rig_entry['cameras'].append(cam_entry)
 
 
             rigs.append(rig_entry)
@@ -132,12 +132,12 @@ class COLMAP_RIG_OT_export(Operator):
         # write file next to output folder
         import os
         os.makedirs(out_path, exist_ok=True)
-        json_path = os.path.join(out_path, "rig_config.json")
+        json_path = os.path.join(out_path, 'rig_config.json')
         with open(json_path, 'w') as f:
             json.dump(rigs, f, indent=4)
 
 
-        self.report({'INFO'}, f"Exported {len(rigs)} rigs to {json_path}")
+        self.report({'INFO'}, f'Exported {len(rigs)} rigs to {json_path}')
         return {'FINISHED'}
 
     

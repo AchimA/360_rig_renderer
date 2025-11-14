@@ -11,9 +11,9 @@ class COLMAP_RIG_OT_render(Operator):
 
     # popup directory selector (defaults to blend file folder when possible)
     filepath = StringProperty(
-        name="Output Path",
-        description="Folder to write rendered images",
-        default="",
+        name='Output Path',
+        description='Folder to write rendered images',
+        default='',
         subtype='DIR_PATH',
     )
 
@@ -32,7 +32,7 @@ class COLMAP_RIG_OT_render(Operator):
 
     def execute(self, context):
         scene = context.scene
-        out_base = bpy.path.abspath(self.filepath or getattr(scene, 'colmap_rig_output_path', '') or "")
+        out_base = bpy.path.abspath(self.filepath or getattr(scene, 'colmap_rig_output_path', '') or '')
         img_format = scene.colmap_rig_image_format
         pad = scene.colmap_rig_zero_pad
 
@@ -79,7 +79,7 @@ class COLMAP_RIG_OT_render(Operator):
                     os.makedirs(cam_folder, exist_ok=True)
 
 
-                    filename = f"image{str(frame).zfill(pad)}.jpg" if img_format == 'JPEG' else f"image{str(frame).zfill(pad)}.png"
+                    filename = f'image{str(frame).zfill(pad)}.jpg' if img_format == 'JPEG' else f'image{str(frame).zfill(pad)}.png'
                     filepath = os.path.join(cam_folder, filename)
 
 

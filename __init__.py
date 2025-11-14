@@ -21,8 +21,8 @@ def register_properties():
 
     if not hasattr(bpy.types.Scene, 'colmap_rig_image_format'):
         bpy.types.Scene.colmap_rig_image_format = EnumProperty(
-        name="Image Format",
-        description="Image file format for rendered frames",
+        name='Image Format',
+        description='Image file format for rendered frames',
         items=(
             ('JPEG', 'JPEG', 'JPEG format'),
             ('PNG', 'PNG', 'PNG format'),
@@ -32,8 +32,8 @@ def register_properties():
 
     if not hasattr(bpy.types.Scene, 'colmap_rig_zero_pad'):
         bpy.types.Scene.colmap_rig_zero_pad = IntProperty(
-        name="Zero pad",
-        description="Number of digits to pad frame numbers",
+        name='Zero pad',
+        description='Number of digits to pad frame numbers',
         default=4,
         min=1,
         max=10,
@@ -60,29 +60,29 @@ def register():
     for name in module_names:
         try:
             # Dynamically import the module.
-            # The f".{name}" and __package__ are crucial for relative imports
-            module = importlib.import_module(f".{name}", __package__)
+            # The f'.{name}' and __package__ are crucial for relative imports
+            module = importlib.import_module(f'.{name}', __package__)
             module.register()
             __modules.append(module)
-            print(f"Registered module: {name}")
+            print(f'Registered module: {name}')
         except ImportError:
-            print(f"Error: Could not import module {name}")
+            print(f'Error: Could not import module {name}')
         except Exception as e:
-            print(f"Error registering module {name}: {e}")
+            print(f'Error registering module {name}: {e}')
     
 def unregister():
     # Unregister in the reverse order to avoid dependency issues
     for module in reversed(__modules):
         try:
             module.unregister()
-            print(f"Unregistered module: {module.__name__}")
+            print(f'Unregistered module: {module.__name__}')
         except Exception as e:
-            print(f"Error unregistering module {module.__name__}: {e}")
+            print(f'Error unregistering module {module.__name__}: {e}')
             
     # Clear the list
     __modules.clear()
     # remove scene properties
     unregister_properties()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     register()
