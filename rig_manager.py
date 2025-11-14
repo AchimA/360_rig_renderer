@@ -28,7 +28,6 @@ class RigItem(bpy.types.PropertyGroup):
     # Path to movie clip or image sequence
     source_filepath: bpy.props.StringProperty(
         name = 'Source Path',
-        subtype = 'FILE_PATH', # Gives it a file browser icon in the UI
         description = 'Path to the Movie Clip or Image Sequence',
         default = '',
         update = lambda self, context: update_media_info(self, context)
@@ -53,8 +52,8 @@ class RigItem(bpy.types.PropertyGroup):
     )
     end_frame: bpy.props.IntProperty(
         name = 'End Frame',
-        default = 250,
-        min = 1,
+        default = -1,
+        min = -1,
         update = lambda self, context: sync_frame_range_to_scene(self, context)
     )
     frame_step: bpy.props.IntProperty(
@@ -68,10 +67,15 @@ class RigItem(bpy.types.PropertyGroup):
         default = 0,
         min = 0
     )
+    num_inkl_cameras: bpy.props.IntProperty(
+        name = 'Number of Included Cameras',
+        default = 0,
+        min = 0
+    )
     # Boolean toggles for workflow
-    include_in_yaml: bpy.props.BoolProperty(
-        name = 'Include in YAML',
-        description = 'Include this rig in the exported YAML config',
+    include_in_json: bpy.props.BoolProperty(
+        name = 'Include in json',
+        description = 'Include this rig in the exported json config',
         default = True
     )
     do_render: bpy.props.BoolProperty(
@@ -211,14 +215,13 @@ def remove_world_material(rig_item):
         bpy.data.worlds.remove(world)
 
 def update_world_name(rig_item, context):
-    """Rename the world material when rig name changes."""
-    # Find world with old name pattern - search for any world starting with "World_"
-    # that might belong to this rig (we can't know the old name)
-    # Better approach: store the world reference or search by ID
-    # For now, we'll use a simpler approach: find world that doesn't match any current rig name
-    
+    """Rename the world material and collection when rig name changes."""
     scene = context.scene
     new_world_name = f"World_{rig_item.name}"
+    
+    # Rename collection if it exists
+    if rig_item.collection and rig_item.collection.name in bpy.data.collections:
+        rig_item.collection.name = rig_item.name
     
     # If world with new name already exists, we're done
     if new_world_name in bpy.data.worlds:
@@ -364,11 +367,19 @@ def update_collection_num_cameras(scene):
     """
 
     for i, item in enumerate(scene.rig_collection):
-        if item.collection and item.collection.name in bpy.data.collections:
-            coll = item.collection
-    
-        num_cams = len([obj for obj in item.collection.objects if obj.type == 'CAMERA'])
-        item.num_cameras = num_cams
+        # Default to zero if collection is missing
+        if not item.collection or item.collection.name not in bpy.data.collections:
+            item.num_cameras = 0
+            item.num_inkl_cameras = 0
+            continue
+
+        coll = item.collection
+        cams = [obj for obj in coll.objects if obj.type == 'CAMERA']
+        item.num_cameras = len(cams)
+
+        # Cameras included for export/render are those not hidden in render
+        included_cams = [cam for cam in cams if not getattr(cam, 'hide_render', False)]
+        item.num_inkl_cameras = len(included_cams)
 
 @bpy.app.handlers.persistent
 def selected_camera_to_active(scene):
@@ -393,6 +404,46 @@ def rebuild_world_materials_on_load(dummy):
 ###########################################################################
 ### Operators #############################################################
 ###########################################################################
+
+class RIG_OT_browse_media(bpy.types.Operator):
+    """Browse for media file (movie or image sequence)"""
+    bl_idname = 'object.rig_browse_media'
+    bl_label = 'Browse Media'
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    filepath: bpy.props.StringProperty(
+        name="File Path",
+        subtype='FILE_PATH'
+    )
+    
+    filter_movie: bpy.props.BoolProperty(default=True, options={'HIDDEN'})
+    filter_image: bpy.props.BoolProperty(default=True, options={'HIDDEN'})
+    filter_folder: bpy.props.BoolProperty(default=True, options={'HIDDEN'})
+    
+    def invoke(self, context, event):
+        scene = context.scene
+        
+        # Set starting directory to blend file location or home
+        if bpy.data.filepath:
+            # Use the directory of the blend file, add trailing slash to stay in directory
+            blend_dir = os.path.dirname(bpy.data.filepath)
+            self.filepath = os.path.join(blend_dir, '')
+        else:
+            self.filepath = os.path.expanduser('~')
+        
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+    
+    def execute(self, context):
+        scene = context.scene
+        idx = scene.rig_index
+        
+        if 0 <= idx < len(scene.rig_collection):
+            item = scene.rig_collection[idx]
+            item.source_filepath = self.filepath
+        
+        return {'FINISHED'}
+
 
 class RIG_OT_actions(bpy.types.Operator):
     '''Move rig items up and down, add and remove'''
@@ -450,12 +501,9 @@ class RIG_OT_actions(bpy.types.Operator):
             item.name = 'Rig_{:d}'.format(scn.max_rig_ID)
             scn.rig_index = len(scn.rig_collection)-1
 
-            # Default source filepath: folder of current .blend if saved,
-            # otherwise default to the user's home directory.
-            if bpy.data.filepath:
-                item.source_filepath = os.path.dirname(bpy.data.filepath)
-            else:
-                item.source_filepath = os.path.expanduser('~')
+            # Leave source_filepath empty initially
+            # The file browser will set the default path when opened
+            item.source_filepath = ''
 
             # Create the managed collection for this rig
             create_rig_collection(item)
@@ -488,10 +536,9 @@ class RIG_UL_LIST(bpy.types.UIList):
             
             row.prop(item, 'name', text='', emboss=False)
 
-            row.prop(item, 'num_cameras', text='', icon='CAMERA_DATA', emboss=False)
-            row.label(text=str(item.num_cameras), icon='CAMERA_DATA')
+            row.label(text=f"{item.num_inkl_cameras}/{item.num_cameras}", icon='CAMERA_DATA')
 
-            row.prop(item, 'include_in_yaml', text='', icon='COPYDOWN' if item.include_in_yaml else 'X', emboss=True)
+            row.prop(item, 'include_in_json', text='', icon='COPYDOWN' if item.include_in_json else 'X', emboss=True)
             row.prop(item, 'do_render', text='', icon='RESTRICT_RENDER_OFF' if item.do_render else 'RESTRICT_RENDER_ON', emboss=True)
 
         elif self.layout_type in {'GRID'}:
@@ -505,10 +552,10 @@ class RIG_UL_LIST(bpy.types.UIList):
 class UIListPanelRigCollection(bpy.types.Panel):
     '''Creates a Panel in the Object properties window'''
     bl_idname = 'COLMAP_RIG_COLLECTION_PT_panel'
-    bl_label = 'COLMAP Rig Exporter'
+    bl_label = 'Rig Manager'
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'COLMAP Rig Exp.'
+    bl_category = 'COLMAP Rig'
 
     def draw(self, context):
         layout = self.layout
@@ -547,7 +594,12 @@ class UIListPanelRigCollection(bpy.types.Panel):
             row.label(text='Cameras: {:d}'.format(item.num_cameras), icon='CAMERA_DATA')
 
             box.prop(item, 'name')
-            box.prop(item, 'source_filepath')
+            
+            # Media file selection with browse button
+            row = box.row(align=True)
+            row.prop(item, 'source_filepath', text='Media')
+            row.operator('object.rig_browse_media', text='', icon='FILE_FOLDER')
+            
             row = box.row()
             row.prop(item, 'start_frame')
             row.prop(item, 'end_frame')
@@ -566,6 +618,7 @@ classes = (
     RigItem,
     RIG_UL_LIST,
     UIListPanelRigCollection,
+    RIG_OT_browse_media,
     RIG_OT_actions,
 )
 

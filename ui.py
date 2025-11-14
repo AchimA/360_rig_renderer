@@ -6,18 +6,14 @@ class COLMAP_RIG_PT_panel(bpy.types.Panel):
     bl_label = 'COLMAP Rig Exporter'
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'COLMAP Rig Exp.'
+    bl_category = 'COLMAP Rig'
 
     def draw(self, context):
         layout = self.layout
         scene = context.scene
 
-        # scene properties (registered in __init__.py)
-        # if hasattr(scene, 'colmap_rig_image_format'):
-        #     layout.prop(scene, 'colmap_rig_image_format')
-        if hasattr(scene, 'colmap_rig_zero_pad'):
-            layout.prop(scene, 'colmap_rig_zero_pad')
-
+        row = layout.row()
+        row.label(text='Cameras that are \'Disabled in Renders\' will be skipped.', icon='RESTRICT_RENDER_ON')
         row = layout.row()
         row.operator(
             'colmap_rig.export',
@@ -30,7 +26,7 @@ class COLMAP_RIG_PT_panel(bpy.types.Panel):
             text='Render all rigs',
             icon='SCENE',
             )
-        row.enabled = False
+        # row.enabled = False
 
 
 classes = (

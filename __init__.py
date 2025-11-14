@@ -30,20 +30,10 @@ def register_properties():
         default='JPEG',
     )
 
-    if not hasattr(bpy.types.Scene, 'colmap_rig_zero_pad'):
-        bpy.types.Scene.colmap_rig_zero_pad = IntProperty(
-        name='Zero pad',
-        description='Number of digits to pad frame numbers',
-        default=4,
-        min=1,
-        max=10,
-    )
-
 
 def unregister_properties():
     for name in (
         'colmap_rig_image_format',
-        'colmap_rig_zero_pad',
     ):
         if hasattr(bpy.types.Scene, name):
             delattr(bpy.types.Scene, name)

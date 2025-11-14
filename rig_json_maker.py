@@ -54,51 +54,59 @@ class COLMAP_RIG_OT_export(Operator):
 
 
     def invoke(self, context, event):
-         # Set the initial directory for the file browser
+        # Set the initial directory for the file browser
         if bpy.data.filepath:
-            # If blend file is saved, start in its directory
-            self.filepath = os.path.dirname(bpy.data.filepath)
+            # Start in blend file directory with default filename
+            blend_dir = os.path.dirname(bpy.data.filepath)
+            self.filepath = os.path.join(blend_dir, 'rig_config.json')
         else:
-            # If not saved, start in user's home directory or a common default
-            # For cross-platform, os.path.expanduser('~') is a good choice for home dir
-            self.filepath = os.path.expanduser('~') # Or a specific default like 'C:\\temp' or '/tmp'
+            # If not saved, start in user's home directory
+            self.filepath = os.path.join(os.path.expanduser('~'), 'rig_config.json')
 
-        # Set the default filename *before* invoking the file browser
-        self.filename = 'rig_config.json' # Ensure default is set every time
-
-        # Open the file browser. The 'INVOKE_DEFAULT' means show the dialog.
-        # context.window_manager.fileselect_report(self)
-        return context.window_manager.invoke_props_dialog(self, width=800)
-        # context.window_manager.fileselect_add(self)
+        # Open the file browser
+        context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
     def execute(self, context):
         scene = context.scene
-        # chosen path from popup takes precedence; fall back to scene property
-        # full_filepath = os.path.join(self.filepath, self.filename)
-        out_path = bpy.path.abspath(self.filepath)
+        # self.filepath now contains the full path to the selected JSON file
+        json_path = bpy.path.abspath(self.filepath)
+        
+        # Ensure the directory exists
+        out_dir = os.path.dirname(json_path)
+        os.makedirs(out_dir, exist_ok=True)
+        
         rigs = []
         depsgraph = context.evaluated_depsgraph_get()
 
+        # Iterate through rig items instead of all collections
+        if not hasattr(scene, 'rig_collection'):
+            self.report({'WARNING'}, 'No rig collection found in scene')
+            return {'CANCELLED'}
 
-        for coll in bpy.data.collections:
-            # skip collections if it's deactivaed
-            # if  not (coll.exclude or coll.hide_viewport or coll.hide_render):
-            #     continue
+        for rig_item in scene.rig_collection:
+            # Skip rigs not marked for json export
+            if not rig_item.include_in_json:
+                continue
 
-            # collect visible cameras in this collection
-            # only include cameras that are visible in both render and viewport
+            # Skip if collection doesn't exist
+            if not rig_item.collection or rig_item.collection.name not in bpy.data.collections:
+                continue
+
+            coll = rig_item.collection
+
+            # Collect visible cameras in this collection
+            # Only include cameras that are visible in both render and viewport
             cams = [
                 obj
-                for obj
-                in coll.objects
-                if obj.type == 'CAMERA' and (not obj.hide_render and not obj.hide_viewport)
-                ]
+                for obj in coll.objects
+                if obj.type == 'CAMERA' and not obj.hide_render
+            ]
 
             if not cams:
                 continue
 
-            # choose reference camera (first visible). User can modify later if needed.
+            # Choose reference camera (first visible). User can modify later if needed.
             ref_cam = cams[0]
             M_ref = _get_evaluated_matrix(ref_cam, depsgraph)
 
@@ -108,34 +116,27 @@ class COLMAP_RIG_OT_export(Operator):
                 M_cam = _get_evaluated_matrix(cam, depsgraph)
                 T_cam_ref = M_ref.inverted() @ M_cam
 
-
                 if cam == ref_cam:
                     cam_entry = {
-                    'image_prefix': f'{coll.name}/{cam.name}/',
-                    'ref_sensor': True
+                        'image_prefix': f'{rig_item.name}/{cam.name}/',
+                        'ref_sensor': True
                     }
                 else:
                     quat, trans = _matrix_to_colmap_quat_trans(T_cam_ref)
                     cam_entry = {
-                    'image_prefix': f'{coll.name}/{cam.name}/',
-                    'cam_from_rig_rotation': quat,
-                    'cam_from_rig_translation': trans
+                        'image_prefix': f'{rig_item.name}/{cam.name}/',
+                        'cam_from_rig_rotation': quat,
+                        'cam_from_rig_translation': trans
                     }
 
-
                 rig_entry['cameras'].append(cam_entry)
-
 
             rigs.append(rig_entry)
 
 
-        # write file next to output folder
-        import os
-        os.makedirs(out_path, exist_ok=True)
-        json_path = os.path.join(out_path, 'rig_config.json')
+        # Write JSON file to selected path
         with open(json_path, 'w') as f:
             json.dump(rigs, f, indent=4)
-
 
         self.report({'INFO'}, f'Exported {len(rigs)} rigs to {json_path}')
         return {'FINISHED'}
