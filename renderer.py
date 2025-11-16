@@ -33,6 +33,10 @@ class COLMAP_RIG_OT_render(Operator):
         orig_frame_end = scene.frame_end
         orig_frame_step = scene.frame_step
         
+        # Temporarily disable auto-camera-switching during rendering
+        orig_sel_cam_active = scene.sel_cam_active
+        scene.sel_cam_active = False
+        
         rendered_count = 0
         total_frames = 0
         
@@ -133,6 +137,7 @@ class COLMAP_RIG_OT_render(Operator):
         scene.frame_start = orig_frame_start
         scene.frame_end = orig_frame_end
         scene.frame_step = orig_frame_step
+        scene.sel_cam_active = orig_sel_cam_active
         
         if rendered_count == 0:
             self.report({'WARNING'}, 'No rigs marked for rendering')

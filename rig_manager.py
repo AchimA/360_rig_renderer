@@ -562,8 +562,6 @@ class UIListPanelRigCollection(bpy.types.Panel):
         scene = context.scene
         obj = context.object
         
-        row = layout.row()
-        row.prop(scene, 'sel_cam_active', text='Auto-activate selected camera', icon='FILE_REFRESH')
         ######## Rig Collection List ########
         rows = 2
         row = layout.row()
@@ -576,6 +574,8 @@ class UIListPanelRigCollection(bpy.types.Panel):
         col.operator('object.rig_action', icon='TRIA_UP', text='').action = 'UP'
         col.operator('object.rig_action', icon='TRIA_DOWN', text='').action = 'DOWN'
         #####################################
+        row = layout.row()
+        row.prop(scene, 'sel_cam_active', text='Auto-activate selected camera')
 
         layout.separator()
         row = layout.row()
