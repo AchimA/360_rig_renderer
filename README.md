@@ -1,6 +1,13 @@
 # 360_rig_renderer
 Blender extension to generate COLMAPs / GLOMAPs rig_config.json from 360° equirectangular footage and render pinhole cameras.
 
+
+<img src="images\2025-11-16 13_38_39-_ Equi2RIG [D__Data_3D_Scans_Insta360test_test1_Equi2RIG.blend] - Blender 4.5.3 .png" alt="User Interface"/>
+*Blender UI setup:*
+|left|acive camera|
+|center|*d view-port with extension in N-Panel|
+|right|collections where you add and position cameras as required|
+
 ## Proposed Workflow
 I found that 360° footage with *'FlowState Stabilization' = off* or *'Direction Lock'* works best. This let's you place cameras, such that the person recoding is not visible in the pinhole cameras.
 
