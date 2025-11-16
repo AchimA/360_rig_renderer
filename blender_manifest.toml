@@ -71,8 +71,10 @@ files = "Export rig JSON specified output directory."
 paths_exclude_pattern = [
   "__pycache__/",
   "/images/",
-  "/.git/",
+  "/.git*/",
+  "/.vscode/",
   "/*.zip",
+  ".gitignore",
   "README.md",
-  "build.ps1",
+  "build.ps1"
 ]

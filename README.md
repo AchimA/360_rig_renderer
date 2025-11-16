@@ -3,14 +3,14 @@ Blender extension to generate COLMAPs / GLOMAPs rig_config.json from 360° equir
 
 ## Proposed Workflow
 1) For each equirectangular footage / sequence, generate a rig and add cameras as needed. It's usually a good idea to place the cameras such that the person recoding is not visible
-2) For normal footage (non equirectangular) add a rig with a single camera and endframe set to -1. This will add a subfolder and adds the rig in the *.json file. You'll then manually have to add the frame sequence to the subfolder.
+2) For normal footage (non equirectangular) add a rig with a single camera and end-frame set to -1. This will add a subfolder and adds the rig in the *.json file. You'll then manually have to add the frame sequence to the subfolder.
 3) Export the *.json file to your COLMAP / GLOMAP project.
-4) Render the frame sequence. The frames are structured in subfolders in the user defined 'output path'.
+4) Render the frame sequence. The frames are structured in sub-folders in the user defined 'output path'.
 
 ## Features
 - Each rig contains:
     - A movie clip / image sequence
-    - lets you define a separate start frame, end frame & frame stepp which is used during rendering
+    - lets you define a separate start frame, end frame & frame step which is used during rendering
     - rendering automatically adds the subfolder structure expected by COLMAP / GLOMAP
 
 ## Current Restrictions
