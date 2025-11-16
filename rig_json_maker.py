@@ -13,30 +13,11 @@ def _get_evaluated_matrix(obj, depsgraph):
     return obj_eval.matrix_world.copy()
 
 
-def _matrix_to_colmap_quat_trans(T):
-    """
-    Convert a Blender 4x4 transformation matrix to COLMAP quaternion and translation.
-    
-    COLMAP camera convention: +X right, +Y down, +Z forward (looking direction)
-    Blender camera convention: +X right, +Y up, +Z backward (opposite of looking direction)
-    
-    We need to transform: Blender -> COLMAP coordinate system
-    """
-    # Create coordinate system conversion matrix
-    # Flip Y (up->down) and Z (backward->forward)
-    blender_to_colmap = mathutils.Matrix((
-        (1,  0,  0, 0),
-        (0, -1,  0, 0),
-        (0,  0, -1, 0),
-        (0,  0,  0, 1)
-    ))
-    
-    # Apply coordinate conversion to the transformation
-    T_colmap = blender_to_colmap @ T @ blender_to_colmap
-    
-    q = T_colmap.to_quaternion()
-    t = T_colmap.to_translation()
-    return [q.w, q.x, q.y, q.z], [t.x, t.y, t.z]
+## Note: Previous coordinate-system conversion helper removed.
+## Relative transforms are currently exported directly in Blender's frame
+## using M_ref.inverted() @ M_cam. If axis flipping (Y/Z) is needed for
+## COLMAP interpretation, apply it to the relative transform before
+## extracting quaternion/translation.
 
 
 class COLMAP_RIG_OT_export(Operator):
@@ -131,7 +112,6 @@ class COLMAP_RIG_OT_export(Operator):
 
             for cam in cams:
                 M_cam = _get_evaluated_matrix(cam, depsgraph)
-                T_cam_ref = M_ref.inverted() @ M_cam
 
                 if cam == ref_cam:
                     cam_entry = {
@@ -139,11 +119,23 @@ class COLMAP_RIG_OT_export(Operator):
                         'ref_sensor': True
                     }
                 else:
-                    quat, trans = _matrix_to_colmap_quat_trans(T_cam_ref)
+                    # Compute relative transformation: from reference to this camera
+                    # Extract clean rotation/translation to avoid scale/shear artifacts
+                    R_ref = M_ref.to_quaternion().to_matrix().to_4x4()
+                    R_ref.translation = M_ref.translation
+                    
+                    R_cam = M_cam.to_quaternion().to_matrix().to_4x4()
+                    R_cam.translation = M_cam.translation
+                    
+                    T_cam_ref = R_ref.inverted() @ R_cam
+                    
+                    # Extract quaternion and translation
+                    q = T_cam_ref.to_quaternion()
+                    t = T_cam_ref.to_translation()
                     cam_entry = {
                         'image_prefix': f'{rig_item.name}/{cam.name}/',
-                        'cam_from_rig_rotation': quat,
-                        'cam_from_rig_translation': trans
+                        'cam_from_rig_rotation': [q.w, q.x, q.y, q.z],
+                        'cam_from_rig_translation': [t.x, t.y, t.z]
                     }
 
                 rig_entry['cameras'].append(cam_entry)
