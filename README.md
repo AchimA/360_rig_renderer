@@ -2,6 +2,9 @@
 Blender extension to generate COLMAPs / GLOMAPs rig_config.json from 360° equirectangular footage and render pinhole cameras.
 
 ## Proposed Workflow
+
+I found that 360° footage with *'FlowState Stabilization' = off* or *'Direction Lock'* works best. This let's you place cameras, such that the person recoding is not visible in the pinhole cameras.
+
 1) For each equirectangular footage / sequence, generate a rig and add cameras as needed. It's usually a good idea to place the cameras such that the person recoding is not visible
 2) For normal footage (non equirectangular) add a rig with a single camera and end-frame set to -1. This will add a subfolder and adds the rig in the *.json file. You'll then manually have to add the frame sequence to the subfolder.
 3) Export the *.json file to your COLMAP / GLOMAP project.
