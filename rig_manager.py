@@ -642,9 +642,9 @@ def register():
     bpy.app.handlers.depsgraph_update_post.append(update_collection_num_cameras)
     bpy.app.handlers.depsgraph_update_post.append(selected_camera_to_active)
     bpy.app.handlers.load_post.append(rebuild_world_materials_on_load)
-
-    # Ensure rig_config collection exists on register
-    ensure_rig_config_collection()
+    
+    # Do not create/link collections during register; context may be restricted.
+    # Parent collection will be ensured lazily when creating a rig item.
 
 def unregister():
     for cls in reversed(classes):

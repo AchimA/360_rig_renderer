@@ -14,11 +14,28 @@ def _get_evaluated_matrix(obj, depsgraph):
 
 
 def _matrix_to_colmap_quat_trans(T):
-    # Flip Y (Blender +Y up -> COLMAP +Y down)
-    flip_y = mathutils.Matrix.Scale(-1, 4, (0, 1, 0))
-    T = flip_y @ T
-    q = T.to_quaternion()
-    t = T.to_translation()
+    """
+    Convert a Blender 4x4 transformation matrix to COLMAP quaternion and translation.
+    
+    COLMAP camera convention: +X right, +Y down, +Z forward (looking direction)
+    Blender camera convention: +X right, +Y up, +Z backward (opposite of looking direction)
+    
+    We need to transform: Blender -> COLMAP coordinate system
+    """
+    # Create coordinate system conversion matrix
+    # Flip Y (up->down) and Z (backward->forward)
+    blender_to_colmap = mathutils.Matrix((
+        (1,  0,  0, 0),
+        (0, -1,  0, 0),
+        (0,  0, -1, 0),
+        (0,  0,  0, 1)
+    ))
+    
+    # Apply coordinate conversion to the transformation
+    T_colmap = blender_to_colmap @ T @ blender_to_colmap
+    
+    q = T_colmap.to_quaternion()
+    t = T_colmap.to_translation()
     return [q.w, q.x, q.y, q.z], [t.x, t.y, t.z]
 
 

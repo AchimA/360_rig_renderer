@@ -3,7 +3,7 @@ schema_version = "1.0.0"
 # Example of manifest file for a Blender extension
 # Change the values according to your extension
 id = "colmap_rig_addon"
-version = "0.1.1"
+version = "0.2.0"
 name = "COLMAP Rig Export & Batch Render"
 tagline = "Export COLMAP rig JSON and batch-render per-camera frames"
 maintainer = "Achim A."
