@@ -83,6 +83,8 @@ class COLMAP_RIG_OT_render(Operator):
         orig_frame_start = scene.frame_start
         orig_frame_end = scene.frame_end
         orig_frame_step = scene.frame_step
+        orig_resolution_x = scene.render.resolution_x
+        orig_resolution_y = scene.render.resolution_y
         
         # Temporarily disable auto-camera-switching during rendering
         orig_sel_cam_active = scene.sel_cam_active
@@ -112,6 +114,10 @@ class COLMAP_RIG_OT_render(Operator):
             # Skip if collection doesn't exist
             if not rig_item.collection or rig_item.collection.name not in bpy.data.collections:
                 continue
+            
+            # Apply this rig's resolution settings
+            scene.render.resolution_x = rig_item.render_resolution[0]
+            scene.render.resolution_y = rig_item.render_resolution[1]
             
             coll = rig_item.collection
             
@@ -176,8 +182,13 @@ class COLMAP_RIG_OT_render(Operator):
                     
                     bpy.ops.render.render(write_still=True)
                     
-                    # Write EXIF data to JPEG files
-                    write_camera_exif(filepath, cam, scene)
+                    # Write EXIF data to JPEG files for non-Perspective rigs only
+                    try:
+                        rig_type = getattr(rig_item, 'rig_type', 'EQUIRECT_360')
+                    except Exception:
+                        rig_type = 'EQUIRECT_360'
+                    if rig_type != 'PERSPECTIVE':
+                        write_camera_exif(filepath, cam, scene)
                     
                     total_frames += 1
             
@@ -192,6 +203,8 @@ class COLMAP_RIG_OT_render(Operator):
         scene.frame_start = orig_frame_start
         scene.frame_end = orig_frame_end
         scene.frame_step = orig_frame_step
+        scene.render.resolution_x = orig_resolution_x
+        scene.render.resolution_y = orig_resolution_y
         scene.sel_cam_active = orig_sel_cam_active
         
         if rendered_count == 0:

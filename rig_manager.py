@@ -25,6 +25,17 @@ class RigItem(bpy.types.PropertyGroup):
         type = bpy.types.Collection,
         description = 'The Blender collection managed by this rig item'
     )
+    # Rig type: equirectangular 360 or perspective
+    rig_type: bpy.props.EnumProperty(
+        name = 'Rig Type',
+        description = 'Type of rig rendering',
+        items = [
+            ('EQUIRECT_360', 'Equirectangular 360°', 'Multiple cameras viewing spherical environment (for 360° footage)'),
+            ('PERSPECTIVE', 'Perspective', 'Single camera with movie clip as background (for regular footage)'),
+        ],
+        default = 'EQUIRECT_360',
+        update = lambda self, context: update_rig_type(self, context)
+    )
     # Path to movie clip or image sequence
     source_filepath: bpy.props.StringProperty(
         name = 'Source Path',
@@ -72,6 +83,17 @@ class RigItem(bpy.types.PropertyGroup):
         default = 0,
         min = 0
     )
+    # Render resolution per rig
+    render_resolution: bpy.props.IntVectorProperty(
+        name = 'Render Resolution',
+        description = 'Render resolution (width, height) for this rig',
+        default = (2048, 1080),
+        size = 2,
+        min = 64,
+        max = 65536,
+        subtype = 'XYZ',
+        update = lambda self, context: sync_rig_resolution_to_scene(self, context)
+    )
     # Boolean toggles for workflow
     include_in_json: bpy.props.BoolProperty(
         name = 'Include in json',
@@ -99,6 +121,16 @@ def sync_frame_range_to_scene(rig_item, context):
                 scene.frame_start = rig_item.start_frame
                 scene.frame_end = rig_item.end_frame
                 scene.frame_step = rig_item.frame_step
+
+def sync_rig_resolution_to_scene(rig_item, context):
+    """Update scene render resolution when rig resolution changes (if it's the active rig)."""
+    scene = context.scene
+    if hasattr(scene, 'rig_collection') and hasattr(scene, 'rig_index'):
+        if 0 <= scene.rig_index < len(scene.rig_collection):
+            if scene.rig_collection[scene.rig_index] == rig_item:
+                # This is the active rig, update scene render resolution
+                scene.render.resolution_x = rig_item.render_resolution[0]
+                scene.render.resolution_y = rig_item.render_resolution[1]
 
 def ensure_rig_config_collection():
     """Ensure the 'rig_config' parent collection exists and is linked to the scene."""
@@ -130,6 +162,68 @@ def projected_frames_for_rig(rig_item: bpy.types.PropertyGroup) -> int:
     except Exception:
         return 0
 
+def create_perspective_camera(rig_item, context):
+    """Create a single camera for perspective rig with movie clip as background."""
+    if not rig_item.collection:
+        create_rig_collection(rig_item)
+    
+    coll = rig_item.collection
+    scene = context.scene
+    
+    # Create camera object
+    cam_data = bpy.data.cameras.new(f"{rig_item.name}_Camera")
+    cam_obj = bpy.data.objects.new(f"{rig_item.name}_Camera", cam_data)
+    
+    # Link to collection
+    coll.objects.link(cam_obj)
+    
+    # Position at origin, looking down -Z (Blender's default camera direction)
+    cam_obj.location = (0, 0, 0)
+    cam_obj.rotation_euler = (0, 0, 0)
+    
+    # Set up camera background image if movie clip exists
+    if rig_item.source_filepath and rig_item.source_filepath.strip():
+        try:
+            # Load or get existing image/movie
+            img = bpy.data.images.load(rig_item.source_filepath, check_existing=True)
+            
+            # Update rig resolution to match source (for perspective rigs)
+            if img.size[0] > 0 and img.size[1] > 0:
+                rig_item.render_resolution = (img.size[0], img.size[1])
+                # Also update scene for immediate viewport preview
+                scene.render.resolution_x = img.size[0]
+                scene.render.resolution_y = img.size[1]
+                print(f"Updated rig resolution to {img.size[0]}x{img.size[1]}")
+            
+            # Set image source type
+            if rig_item.source_type == 'Movie Clip':
+                img.source = 'MOVIE'
+            elif rig_item.source_type == 'Image Sequence':
+                img.source = 'SEQUENCE'
+            else:
+                img.source = 'FILE'
+            
+            # Add as camera background image
+            cam_data.show_background_images = True
+            bg = cam_data.background_images.new()
+            bg.image = img
+            bg.alpha = 1.0  # Full opacity
+            bg.display_depth = 'BACK'  # Behind scene geometry
+            
+            # For animated sources, configure frame settings
+            if rig_item.source_type in ['Movie Clip', 'Image Sequence']:
+                bg.frame_method = 'STRETCH'  # or 'FIT' depending on preference
+                bg.image_user.use_auto_refresh = True
+                bg.image_user.use_cyclic = False
+                bg.image_user.frame_start = 1
+                if rig_item.media_frame_count > 0:
+                    bg.image_user.frame_duration = rig_item.media_frame_count
+            
+        except Exception as e:
+            print(f"Error setting up camera background image: {e}")
+    
+    return cam_obj
+
 def create_rig_collection(rig_item):
     """Create a new collection for the given rig_item under rig_config."""
     parent_coll = ensure_rig_config_collection()
@@ -155,7 +249,13 @@ def remove_rig_collection(rig_item):
         rig_item.collection = None
 
 def create_or_update_world_material(rig_item):
-    """Create or update world material with environment texture for the rig."""
+    """Create or update world material with environment texture for the rig.
+    Only creates world material for EQUIRECT_360 rigs."""
+    
+    # Only create world material for equirect rigs
+    if rig_item.rig_type != 'EQUIRECT_360':
+        return None
+    
     world_name = f"World_{rig_item.name}"
     
     # Get or create world
@@ -233,6 +333,20 @@ def remove_world_material(rig_item):
     if world_name in bpy.data.worlds:
         world = bpy.data.worlds[world_name]
         bpy.data.worlds.remove(world)
+
+def update_rig_type(rig_item, context):
+    """Handle rig type changes: switch between equirect and perspective rendering."""
+    if rig_item.rig_type == 'PERSPECTIVE':
+        # For perspective rigs, create a single camera if none exists
+        if rig_item.collection:
+            cams = [obj for obj in rig_item.collection.objects if obj.type == 'CAMERA']
+            if not cams and rig_item.source_filepath:
+                # Auto-create camera for perspective rig
+                create_perspective_camera(rig_item, context)
+    else:
+        # Equirect mode - ensure world material exists
+        if rig_item.source_filepath:
+            create_or_update_world_material(rig_item)
 
 def update_world_name(rig_item, context):
     """Rename the world material and collection when rig name changes."""
@@ -327,8 +441,26 @@ def update_media_info(rig_item, context):
         rig_item.source_type = 'Unknown format'
         print(f"Warning: Unsupported file extension '{ext}'")
     
-    # Create or update world material with the media
-    create_or_update_world_material(rig_item)
+    # Create appropriate setup based on rig type
+    if rig_item.rig_type == 'EQUIRECT_360':
+        # Create or update world material with the media
+        create_or_update_world_material(rig_item)
+    elif rig_item.rig_type == 'PERSPECTIVE':
+        # Ensure a perspective camera exists
+        if rig_item.collection:
+            cams = [obj for obj in rig_item.collection.objects if obj.type == 'CAMERA']
+            if not cams:
+                create_perspective_camera(rig_item, bpy.context)
+        # Update rig resolution from media (update callback handles scene sync)
+        try:
+            img = bpy.data.images.load(filepath, check_existing=True)
+            width = int(img.size[0]) if img.size[0] else 0
+            height = int(img.size[1]) if img.size[1] else 0
+            if width > 0 and height > 0:
+                # Respect minimum of 64; update callback syncs to scene automatically
+                rig_item.render_resolution = (max(64, width), max(64, height))
+        except Exception as e:
+            print(f"Warning: Could not load media to detect resolution: {e}")
 
 def update_collection_visibility(scene):
     """Show only the active rig collection in viewport, hide all others, and set it as active."""
@@ -361,10 +493,14 @@ def update_collection_visibility(scene):
                 if cameras:
                     scene.camera = cameras[-1]
                 
-                # Switch world material to this rig's world
-                world_name = f"World_{item.name}"
-                if world_name in bpy.data.worlds:
-                    scene.world = bpy.data.worlds[world_name]
+                # Switch world material to this rig's world (only for equirect rigs)
+                if item.rig_type == 'EQUIRECT_360':
+                    world_name = f"World_{item.name}"
+                    if world_name in bpy.data.worlds:
+                        scene.world = bpy.data.worlds[world_name]
+                else:
+                    # For perspective rigs, clear the world material
+                    scene.world = None
                 
                 # Set all 3D viewports to RENDERED shading mode
                 for window in bpy.context.window_manager.windows:
@@ -378,6 +514,10 @@ def update_collection_visibility(scene):
                 scene.frame_start = item.start_frame
                 scene.frame_end = item.end_frame
                 scene.frame_step = item.frame_step
+                
+                # Update render resolution from rig settings
+                scene.render.resolution_x = item.render_resolution[0]
+                scene.render.resolution_y = item.render_resolution[1]
 
 
 @bpy.app.handlers.persistent
@@ -424,6 +564,29 @@ def rebuild_world_materials_on_load(dummy):
 ###########################################################################
 ### Operators #############################################################
 ###########################################################################
+
+class RIG_OT_create_perspective_camera(bpy.types.Operator):
+    """Create a perspective camera for the selected rig"""
+    bl_idname = 'object.rig_create_perspective_camera'
+    bl_label = 'Create Perspective Camera'
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        scene = context.scene
+        idx = scene.rig_index
+        
+        if 0 <= idx < len(scene.rig_collection):
+            item = scene.rig_collection[idx]
+            
+            if item.rig_type != 'PERSPECTIVE':
+                self.report({'WARNING'}, 'Can only create camera for Perspective rigs')
+                return {'CANCELLED'}
+            
+            cam_obj = create_perspective_camera(item, context)
+            self.report({'INFO'}, f'Created camera: {cam_obj.name}')
+        
+        return {'FINISHED'}
+
 
 class RIG_OT_browse_media(bpy.types.Operator):
     """Browse for media file (movie or image sequence)"""
@@ -521,6 +684,9 @@ class RIG_OT_actions(bpy.types.Operator):
             item.name = 'Rig_{:d}'.format(scn.max_rig_ID)
             scn.rig_index = len(scn.rig_collection)-1
 
+            # Initialize resolution to 2K default
+            item.render_resolution = (2048, 1080)
+
             # Leave source_filepath empty initially
             # The file browser will set the default path when opened
             item.source_filepath = ''
@@ -564,7 +730,7 @@ class RIG_UL_LIST(bpy.types.UIList):
 
         elif self.layout_type in {'GRID'}:
             layout.alignment = 'CENTER'
-            layout.label(text='', icon = custom_icon)
+            layout.label(text='', icon='CAMERA_DATA')
 
     def invoke(self, context, event):
         pass
@@ -618,23 +784,47 @@ class UIListPanelRigCollection(bpy.types.Panel):
         if len(scene.rig_collection) > 0 and 0 <= idx < len(scene.rig_collection):
             item = scene.rig_collection[idx]
             box = layout.box()
-            box.label(text=f'Selected: {item.name}')
-            row = box.row()
-            row.label(text='Type: {:s}'.format(item.source_type), icon='FILE_MOVIE')
-            row.label(text='Frames: {:d}'.format(item.media_frame_count), icon='MOD_TIME')
-            row.label(text='Cameras: {:d}'.format(item.num_cameras), icon='CAMERA_DATA')
-
+            
+            # Title row with centered, scaled text
+            title_row = box.row()
+            title_row.alignment = 'CENTER'
+            title_row.scale_y = 1.2
+            title_row.label(text=f'Selected: {item.name}')
+            
+            # Info grid - 2x2 layout with consistent spacing
+            grid = box.grid_flow(row_major=True, columns=2, even_columns=True, align=True)
+            grid.label(text='Type: {:s}'.format(item.source_type), icon='FILE_MOVIE')
+            grid.label(text='Cameras: {:d}'.format(item.num_cameras), icon='CAMERA_DATA')
+            grid.label(text='Frames: {:d}'.format(item.media_frame_count), icon='MOD_TIME')
+            
             # Projected frames for this rig (independent of do_render)
             proj_frames = projected_frames_for_rig(item)
-            row = box.row()
-            row.label(text=f"Projected render frames: {proj_frames}", icon='RENDER_ANIMATION')
+            grid.label(text=f"Render: {proj_frames}", icon='RENDER_ANIMATION')
 
             box.prop(item, 'name')
+            
+            # Rig type selector
+            box.prop(item, 'rig_type', text='Type')
             
             # Media file selection with browse button
             row = box.row(align=True)
             row.prop(item, 'source_filepath', text='Media')
             row.operator('object.rig_browse_media', text='', icon='FILE_FOLDER')
+            
+            # For perspective rigs, show camera creation button if no camera exists
+            if item.rig_type == 'PERSPECTIVE' and item.collection:
+                cams = [obj for obj in item.collection.objects if obj.type == 'CAMERA']
+                if not cams:
+                    row = box.row()
+                    row.operator('object.rig_create_perspective_camera', text='Create Camera', icon='CAMERA_DATA')
+            
+            # Resolution settings (compact: label left, stacked X/Y right)
+            split = box.split(factor=0.5, align=True)
+            split.label(text='Render Resolution:')
+            col_res = split.column(align=True)
+            col_res.enabled = (item.rig_type == 'EQUIRECT_360')
+            col_res.prop(item, 'render_resolution', index=0, text='X')
+            col_res.prop(item, 'render_resolution', index=1, text='Y')
             
             row = box.row()
             row.prop(item, 'start_frame')
@@ -654,6 +844,7 @@ classes = (
     RigItem,
     RIG_UL_LIST,
     UIListPanelRigCollection,
+    RIG_OT_create_perspective_camera,
     RIG_OT_browse_media,
     RIG_OT_actions,
 )
