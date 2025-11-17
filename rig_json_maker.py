@@ -13,11 +13,18 @@ def _get_evaluated_matrix(obj, depsgraph):
     return obj_eval.matrix_world.copy()
 
 
-## Note: Previous coordinate-system conversion helper removed.
-## Relative transforms are currently exported directly in Blender's frame
-## using M_ref.inverted() @ M_cam. If axis flipping (Y/Z) is needed for
-## COLMAP interpretation, apply it to the relative transform before
-## extracting quaternion/translation.
+def _blender_to_colmap_camera():
+    '''
+    Blender camera: looks down -Z (Y up, X right)
+    COLMAP camera: looks down +Z (Y down, X right)
+    Returns 180° rotation around X axis (flips Y and Z).
+    '''
+    return mathutils.Matrix((
+        (1,  0,  0, 0),
+        (0, -1,  0, 0),
+        (0,  0, -1, 0),
+        (0,  0,  0, 1)
+    ))
 
 
 class COLMAP_RIG_OT_export(Operator):
@@ -120,6 +127,9 @@ class COLMAP_RIG_OT_export(Operator):
                     }
                 else:
                     # Compute relative transformation: from reference to this camera
+                    # M_ref and M_cam are already world matrices (evaluated with depsgraph)
+                    # so parenting is already baked in
+                    
                     # Extract clean rotation/translation to avoid scale/shear artifacts
                     R_ref = M_ref.to_quaternion().to_matrix().to_4x4()
                     R_ref.translation = M_ref.translation
@@ -127,11 +137,19 @@ class COLMAP_RIG_OT_export(Operator):
                     R_cam = M_cam.to_quaternion().to_matrix().to_4x4()
                     R_cam.translation = M_cam.translation
                     
-                    T_cam_ref = R_ref.inverted() @ R_cam
+                    # Despite COLMAP docs saying "cam_from_rig", testing shows it expects the inverse
+                    # Compute rig_from_cam (inverse): how to get from camera to rig
+                    T_cam_from_rig = R_ref.inverted() @ R_cam
+                    T_rig_from_cam = T_cam_from_rig.inverted()
+                    
+                    # Apply camera frame conversion (Blender: looks down -Z, COLMAP: looks down +Z)
+                    C = _blender_to_colmap_camera()
+                    T_final = C @ T_rig_from_cam @ C
                     
                     # Extract quaternion and translation
-                    q = T_cam_ref.to_quaternion()
-                    t = T_cam_ref.to_translation()
+                    q = T_final.to_quaternion()
+                    t = T_final.to_translation()
+                    
                     cam_entry = {
                         'image_prefix': f'{rig_item.name}/{cam.name}/',
                         'cam_from_rig_rotation': [q.w, q.x, q.y, q.z],
