@@ -110,6 +110,26 @@ def ensure_rig_config_collection():
         bpy.context.scene.collection.children.link(parent_coll)
     return parent_coll
 
+def projected_frames_for_rig(rig_item: bpy.types.PropertyGroup) -> int:
+    """Compute projected frames to render for a single rig.
+
+    Uses the formula requested: num_inkl_cameras * floor((end_frame - start_frame)/frame_step).
+    Returns 0 if values are not valid.
+    """
+    try:
+        # Respect do_render flag
+        if not getattr(rig_item, 'do_render', False):
+            return 0
+        step = int(rig_item.frame_step)
+        if step <= 0:
+            return 0
+        # floor division; clamp at 0 in case end < start
+        frame_span = int(rig_item.end_frame) - int(rig_item.start_frame)
+        per_camera = max(0, frame_span // step)
+        return int(rig_item.num_inkl_cameras) * per_camera
+    except Exception:
+        return 0
+
 def create_rig_collection(rig_item):
     """Create a new collection for the given rig_item under rig_config."""
     parent_coll = ensure_rig_config_collection()
@@ -537,6 +557,7 @@ class RIG_UL_LIST(bpy.types.UIList):
             row.prop(item, 'name', text='', emboss=False)
 
             row.label(text=f"{item.num_inkl_cameras}/{item.num_cameras}", icon='CAMERA_DATA')
+            row.label(text=f"{projected_frames_for_rig(item)}", icon='RESTRICT_RENDER_OFF')
 
             row.prop(item, 'include_in_json', text='', icon='COPYDOWN' if item.include_in_json else 'X', emboss=True)
             row.prop(item, 'do_render', text='', icon='RESTRICT_RENDER_OFF' if item.do_render else 'RESTRICT_RENDER_ON', emboss=True)
@@ -577,6 +598,16 @@ class UIListPanelRigCollection(bpy.types.Panel):
         row = layout.row()
         row.prop(scene, 'sel_cam_active', text='Auto-activate selected camera')
 
+        # Total across rigs with do_render=True
+        total = 0
+        try:
+            total = sum(projected_frames_for_rig(i) for i in scene.rig_collection if getattr(i, 'do_render', False))
+        except Exception:
+            total = 0
+        # layout.separator()
+        total_row = layout.row()
+        total_row.label(text=f"Total projected frames (queued): {total}", icon='SEQUENCE')
+
         layout.separator()
         row = layout.row()
         row.label(text='Rig Settings:')
@@ -592,6 +623,11 @@ class UIListPanelRigCollection(bpy.types.Panel):
             row.label(text='Type: {:s}'.format(item.source_type), icon='FILE_MOVIE')
             row.label(text='Frames: {:d}'.format(item.media_frame_count), icon='MOD_TIME')
             row.label(text='Cameras: {:d}'.format(item.num_cameras), icon='CAMERA_DATA')
+
+            # Projected frames for this rig (independent of do_render)
+            proj_frames = projected_frames_for_rig(item)
+            row = box.row()
+            row.label(text=f"Projected render frames: {proj_frames}", icon='RENDER_ANIMATION')
 
             box.prop(item, 'name')
             
