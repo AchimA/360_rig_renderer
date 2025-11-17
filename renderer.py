@@ -2,6 +2,57 @@ import bpy
 import os
 from bpy.types import Operator
 
+try:
+    import piexif
+    PIEXIF_AVAILABLE = True
+except ImportError:
+    PIEXIF_AVAILABLE = False
+    print("Warning: piexif not available, EXIF data will not be written to images")
+
+
+def write_camera_exif(image_path, camera_obj, scene):
+    """Write EXIF metadata to JPEG images for COLMAP camera parameter detection."""
+    if not PIEXIF_AVAILABLE:
+        return
+    
+    # Only write EXIF to JPEG files
+    if not (image_path.lower().endswith('.jpg') or image_path.lower().endswith('.jpeg')):
+        return
+    
+    try:
+        camera_data = camera_obj.data
+        
+        # Get camera parameters
+        focal_mm = camera_data.lens  # Focal length in mm
+        sensor_width_mm = camera_data.sensor_width  # Sensor width in mm
+        image_width_px = scene.render.resolution_x
+        image_height_px = scene.render.resolution_y
+        
+        # Calculate 35mm equivalent focal length
+        focal_35mm = int((focal_mm / sensor_width_mm) * 36.0)
+        
+        # Create EXIF data
+        exif_dict = {
+            "0th": {
+                piexif.ImageIFD.Make: "Blender",
+                piexif.ImageIFD.Model: "Virtual Camera",
+                piexif.ImageIFD.Software: f"Blender {bpy.app.version_string}",
+            },
+            "Exif": {
+                piexif.ExifIFD.FocalLength: (int(focal_mm * 100), 100),  # Store as rational (numerator, denominator)
+                piexif.ExifIFD.FocalLengthIn35mmFilm: focal_35mm,
+                piexif.ExifIFD.PixelXDimension: image_width_px,
+                piexif.ExifIFD.PixelYDimension: image_height_px,
+            },
+        }
+        
+        # Insert EXIF data into the image
+        exif_bytes = piexif.dump(exif_dict)
+        piexif.insert(exif_bytes, image_path)
+        
+    except Exception as e:
+        print(f"Warning: Failed to write EXIF data to {image_path}: {e}")
+
 
 class COLMAP_RIG_OT_render(Operator):
     bl_idname = 'colmap_rig.render'
@@ -124,6 +175,10 @@ class COLMAP_RIG_OT_render(Operator):
                     scene.render.filepath = filepath
                     
                     bpy.ops.render.render(write_still=True)
+                    
+                    # Write EXIF data to JPEG files
+                    write_camera_exif(filepath, cam, scene)
+                    
                     total_frames += 1
             
             rendered_count += 1

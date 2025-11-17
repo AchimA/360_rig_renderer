@@ -31,6 +31,15 @@ eras, such that the person recoding is not visible in the pinhole cameras.
 ## Current Restrictions
 Please don't rename or delete the collections that are handled by the extension. I currently couldn't figure out a way to prevent the user from messing with this.
 
+## Third-Party Libraries
+
+This extension bundles the following third-party libraries:
+
+- **piexif** v1.1.3 - MIT License - https://github.com/hMatoba/Piexif
+  - Used for writing EXIF metadata (focal length, sensor size) to rendered JPEG images
+  - Enables COLMAP to automatically detect camera parameters from image files
+  - License: See `wheels/LICENSE-piexif.txt`
+
 # Issues / ToDO (prob. many more than listed here)
 - [ ] User can delete collections and potentially break some functionality
 - [ ] Image sequences are imported sparse. Make sure to set the Frame Step' so that only frames with images are actually rendered.
