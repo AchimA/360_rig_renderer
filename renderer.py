@@ -1,5 +1,7 @@
 import bpy
 import os
+import re
+from pathlib import Path
 from bpy.types import Operator
 
 try:
@@ -62,6 +64,19 @@ class COLMAP_RIG_OT_render(Operator):
     def execute(self, context):
         
         scene = context.scene
+        # Preserve original compositor state and link (if any)
+        orig_use_nodes = scene.use_nodes
+        original_composite_link = None
+        comp_tree = None
+        try:
+            comp_tree = scene.node_tree if scene.use_nodes and scene.node_tree else None
+            if comp_tree:
+                comp_node = next((n for n in comp_tree.nodes if n.type == 'COMPOSITE'), None)
+                if comp_node and comp_node.inputs and comp_node.inputs[0].is_linked:
+                    link = comp_node.inputs[0].links[0]
+                    original_composite_link = (link.from_node.name, link.from_socket.name, comp_node.name, comp_node.inputs[0].name)
+        except Exception:
+            pass
         
         # Use render output path (// resolves to blend file directory)
         out_base = bpy.path.abspath(scene.render.filepath)
@@ -115,6 +130,17 @@ class COLMAP_RIG_OT_render(Operator):
             if not rig_item.collection or rig_item.collection.name not in bpy.data.collections:
                 continue
             
+            # Set world per rig type (ensure equirect rigs use their world, perspective uses none)
+            try:
+                if getattr(rig_item, 'rig_type', 'EQUIRECT_360') == 'EQUIRECT_360':
+                    world_name = f"World_{rig_item.name}"
+                    if world_name in bpy.data.worlds:
+                        scene.world = bpy.data.worlds[world_name]
+                else:
+                    scene.world = None
+            except Exception:
+                pass
+
             # Apply this rig's resolution settings
             scene.render.resolution_x = rig_item.render_resolution[0]
             scene.render.resolution_y = rig_item.render_resolution[1]
@@ -150,6 +176,76 @@ class COLMAP_RIG_OT_render(Operator):
                 scene.frame_set(frame)
                 
                 for cam in cams:
+                    # Configure compositor for Perspective rigs if requested
+                    try:
+                        rig_type = getattr(rig_item, 'rig_type', 'EQUIRECT_360')
+                        use_comp = getattr(rig_item, 'use_compositor_media', False)
+                        src_path = getattr(rig_item, 'source_filepath', '')
+                    except Exception:
+                        rig_type, use_comp, src_path = 'EQUIRECT_360', False, ''
+
+                    if rig_type == 'PERSPECTIVE' and use_comp and src_path:
+                        scene.use_nodes = True
+                        if not scene.node_tree:
+                            scene.node_tree = bpy.data.node_groups.new('Compositing', 'CompositorNodeTree')
+                        nt = scene.node_tree
+                        # Ensure composite node exists
+                        comp = next((n for n in nt.nodes if n.type == 'COMPOSITE'), None)
+                        if not comp:
+                            comp = nt.nodes.new('CompositorNodeComposite')
+                            comp.location = (400, 0)
+                        src_type = getattr(rig_item, 'source_type', '')
+                        # Use Movie Clip node for videos
+                        if src_type == 'Movie Clip':
+                            clip_node = next((n for n in nt.nodes if n.name == 'RIG_MEDIA_CLIP' and n.type == 'MOVIECLIP'), None)
+                            if not clip_node:
+                                clip_node = nt.nodes.new('CompositorNodeMovieClip')
+                                clip_node.name = 'RIG_MEDIA_CLIP'
+                                clip_node.label = 'RIG_MEDIA_CLIP'
+                                clip_node.location = (0, -120)
+                            try:
+                                clip = bpy.data.movieclips.load(src_path, check_existing=True)
+                                clip_node.clip = clip
+                                # Clear composite input links
+                                while comp.inputs and comp.inputs[0].is_linked:
+                                    nt.links.remove(comp.inputs[0].links[0])
+                                nt.links.new(clip_node.outputs.get('Image'), comp.inputs[0])
+                            except Exception as e:
+                                print(f'Warning: compositor movie clip load failed: {e}')
+                        else:
+                            # Image node; for sequences, swap image per frame
+                            img_node = next((n for n in nt.nodes if n.name == 'RIG_MEDIA_IMAGE' and n.type == 'IMAGE'), None)
+                            if not img_node:
+                                img_node = nt.nodes.new('CompositorNodeImage')
+                                img_node.name = 'RIG_MEDIA_IMAGE'
+                                img_node.label = 'RIG_MEDIA_IMAGE'
+                                img_node.location = (0, 0)
+                            try:
+                                frame_path = src_path
+                                if src_type == 'Image Sequence':
+                                    p = Path(src_path)
+                                    stem = p.stem
+                                    m = re.match(r'(.+?)(\d+)$', stem)
+                                    if m:
+                                        base, digits = m.groups()
+                                        pad = len(digits)
+                                        frame_name = f"{base}{str(frame).zfill(pad)}{p.suffix}"
+                                        fp = Path(p.parent) / frame_name
+                                        if fp.exists():
+                                            frame_path = str(fp)
+                                img = bpy.data.images.load(frame_path, check_existing=True)
+                                img.source = 'FILE'
+                                img_node.image = img
+                                # Clear composite input links
+                                while comp.inputs and comp.inputs[0].is_linked:
+                                    nt.links.remove(comp.inputs[0].links[0])
+                                nt.links.new(img_node.outputs.get('Image'), comp.inputs[0])
+                            except Exception as e:
+                                print(f'Warning: compositor image load failed: {e}')
+                    else:
+                        # Disable compositor for non-composited passes
+                        scene.use_nodes = False
+
                     current_frame_index += 1
                     progress = (current_frame_index / total_frames_to_render) * 100
                     
@@ -182,12 +278,13 @@ class COLMAP_RIG_OT_render(Operator):
                     
                     bpy.ops.render.render(write_still=True)
                     
-                    # Write EXIF data to JPEG files for non-Perspective rigs only
+                    # Write EXIF data to JPEG files only if enabled and rig is not Perspective
                     try:
                         rig_type = getattr(rig_item, 'rig_type', 'EQUIRECT_360')
+                        write_exif = getattr(rig_item, 'write_exif', True)
                     except Exception:
-                        rig_type = 'EQUIRECT_360'
-                    if rig_type != 'PERSPECTIVE':
+                        rig_type, write_exif = 'EQUIRECT_360', True
+                    if rig_type != 'PERSPECTIVE' and write_exif:
                         write_camera_exif(filepath, cam, scene)
                     
                     total_frames += 1
@@ -206,6 +303,21 @@ class COLMAP_RIG_OT_render(Operator):
         scene.render.resolution_x = orig_resolution_x
         scene.render.resolution_y = orig_resolution_y
         scene.sel_cam_active = orig_sel_cam_active
+        # Restore compositor link/state
+        try:
+            if original_composite_link and scene.node_tree:
+                nt = scene.node_tree
+                from_node_name, from_socket_name, comp_name, comp_input_name = original_composite_link
+                comp = nt.nodes.get(comp_name)
+                from_node = nt.nodes.get(from_node_name)
+                if comp and from_node:
+                    # Clear current link
+                    if comp.inputs and comp.inputs[0].is_linked:
+                        nt.links.remove(comp.inputs[0].links[0])
+                    nt.links.new(from_node.outputs.get(from_socket_name), comp.inputs[0])
+        except Exception:
+            pass
+        scene.use_nodes = orig_use_nodes
         
         if rendered_count == 0:
             self.report({'WARNING'}, 'No rigs marked for rendering')

@@ -2,6 +2,8 @@
 import bpy
 import os
 import math
+import pathlib
+import re
 
 # Rig Item Property Group
 class RigItem(bpy.types.PropertyGroup):
@@ -105,6 +107,16 @@ class RigItem(bpy.types.PropertyGroup):
         description = 'Include this rig in batch rendering',
         default = True
     )
+    write_exif: bpy.props.BoolProperty(
+        name = 'Write EXIF (JPEG)',
+        description = 'Embed camera EXIF metadata into rendered JPEG files (ignored for non-JPEG formats and perspective rigs)',
+        default = True
+    )
+    use_compositor_media: bpy.props.BoolProperty(
+        name = 'Render Media via Compositor',
+        description = 'For Perspective rigs: composite the media (movie/sequence) directly to the output frames',
+        default = True
+    )
 
 
 ###########################################################################
@@ -181,44 +193,10 @@ def create_perspective_camera(rig_item, context):
     cam_obj.location = (0, 0, 0)
     cam_obj.rotation_euler = (0, 0, 0)
     
-    # Set up camera background image if movie clip exists
+    # Set up camera background image if media exists
     if rig_item.source_filepath and rig_item.source_filepath.strip():
         try:
-            # Load or get existing image/movie
-            img = bpy.data.images.load(rig_item.source_filepath, check_existing=True)
-            
-            # Update rig resolution to match source (for perspective rigs)
-            if img.size[0] > 0 and img.size[1] > 0:
-                rig_item.render_resolution = (img.size[0], img.size[1])
-                # Also update scene for immediate viewport preview
-                scene.render.resolution_x = img.size[0]
-                scene.render.resolution_y = img.size[1]
-                print(f"Updated rig resolution to {img.size[0]}x{img.size[1]}")
-            
-            # Set image source type
-            if rig_item.source_type == 'Movie Clip':
-                img.source = 'MOVIE'
-            elif rig_item.source_type == 'Image Sequence':
-                img.source = 'SEQUENCE'
-            else:
-                img.source = 'FILE'
-            
-            # Add as camera background image
-            cam_data.show_background_images = True
-            bg = cam_data.background_images.new()
-            bg.image = img
-            bg.alpha = 1.0  # Full opacity
-            bg.display_depth = 'BACK'  # Behind scene geometry
-            
-            # For animated sources, configure frame settings
-            if rig_item.source_type in ['Movie Clip', 'Image Sequence']:
-                bg.frame_method = 'STRETCH'  # or 'FIT' depending on preference
-                bg.image_user.use_auto_refresh = True
-                bg.image_user.use_cyclic = False
-                bg.image_user.frame_start = 1
-                if rig_item.media_frame_count > 0:
-                    bg.image_user.frame_duration = rig_item.media_frame_count
-            
+            set_camera_background_image_for_perspective(rig_item, cam_obj)
         except Exception as e:
             print(f"Error setting up camera background image: {e}")
     
@@ -327,6 +305,39 @@ def create_or_update_world_material(rig_item):
     
     return world
 
+def set_camera_background_image_for_perspective(rig_item, cam_obj):
+    """Attach or update the camera background image for a perspective rig camera.
+    This is viewport-only; it does not render into final frames.
+    """
+    filepath = rig_item.source_filepath
+    if not filepath:
+        return
+
+    img = bpy.data.images.load(filepath, check_existing=True)
+
+    if rig_item.source_type == 'Movie Clip':
+        img.source = 'MOVIE'
+    elif rig_item.source_type == 'Image Sequence':
+        img.source = 'SEQUENCE'
+    else:
+        img.source = 'FILE'
+
+    cam_data = cam_obj.data
+    cam_data.show_background_images = True
+
+    # Reuse first slot if present, otherwise create a new one
+    bg = cam_data.background_images[0] if cam_data.background_images else cam_data.background_images.new()
+    bg.image = img
+    bg.alpha = 1.0
+    bg.display_depth = 'BACK'
+    if rig_item.source_type in ['Movie Clip', 'Image Sequence']:
+        bg.frame_method = 'STRETCH'
+        bg.image_user.use_auto_refresh = True
+        bg.image_user.use_cyclic = False
+        bg.image_user.frame_start = 1
+        if rig_item.media_frame_count > 0:
+            bg.image_user.frame_duration = rig_item.media_frame_count
+
 def remove_world_material(rig_item):
     """Remove the world material associated with the rig_item."""
     world_name = f"World_{rig_item.name}"
@@ -343,10 +354,14 @@ def update_rig_type(rig_item, context):
             if not cams and rig_item.source_filepath:
                 # Auto-create camera for perspective rig
                 create_perspective_camera(rig_item, context)
+        # Perspective rigs do not write EXIF by default
+        rig_item.write_exif = False
+        rig_item.use_compositor_media = True
     else:
         # Equirect mode - ensure world material exists
         if rig_item.source_filepath:
             create_or_update_world_material(rig_item)
+        rig_item.use_compositor_media = False
 
 def update_world_name(rig_item, context):
     """Rename the world material and collection when rig name changes."""
@@ -372,8 +387,6 @@ def update_world_name(rig_item, context):
 
 def update_media_info(rig_item, context):
     """Auto-detect media type and update frame count when source_filepath changes."""
-    import pathlib
-    import re
     
     filepath = rig_item.source_filepath
     if not filepath:
@@ -410,6 +423,7 @@ def update_media_info(rig_item, context):
             print(f"Movie clip loaded: {frame_count} frames")
         except Exception as e:
             print(f"Error loading movie clip: {e}")
+        # No manual override; use detected frame count
     
     elif ext in IMAGE_EXTS:
         # For image sequences, count files with frame numbers in the same directory
@@ -433,6 +447,7 @@ def update_media_info(rig_item, context):
                 rig_item.media_frame_count = count
                 rig_item.end_frame = count
                 print(f"Image sequence detected: {count} frames")
+                # No manual override; use detected sequence count
         else:
             rig_item.source_type = 'Single Image'
             rig_item.media_frame_count = 1
@@ -451,6 +466,12 @@ def update_media_info(rig_item, context):
             cams = [obj for obj in rig_item.collection.objects if obj.type == 'CAMERA']
             if not cams:
                 create_perspective_camera(rig_item, bpy.context)
+            else:
+                # Update background image on the existing camera
+                try:
+                    set_camera_background_image_for_perspective(rig_item, cams[0])
+                except Exception as e:
+                    print(f"Warning: Could not set camera background image: {e}")
         # Update rig resolution from media (update callback handles scene sync)
         try:
             img = bpy.data.images.load(filepath, check_existing=True)
@@ -806,10 +827,14 @@ class UIListPanelRigCollection(bpy.types.Panel):
             # Rig type selector
             box.prop(item, 'rig_type', text='Type')
             
-            # Media file selection with browse button
-            row = box.row(align=True)
-            row.prop(item, 'source_filepath', text='Media')
-            row.operator('object.rig_browse_media', text='', icon='FILE_FOLDER')
+            # Media section
+            media_box = box.box()
+            media_box.label(text='Media', icon='FILE_FOLDER')
+            rowm = media_box.row(align=True)
+            rowm.prop(item, 'source_filepath', text='Path')
+            rowm.operator('object.rig_browse_media', text='', icon='FILEBROWSER')
+            rowm = media_box.row(align=True)
+            rowm.label(text=f'Auto: {item.media_frame_count}', icon='TIME')
             
             # For perspective rigs, show camera creation button if no camera exists
             if item.rig_type == 'PERSPECTIVE' and item.collection:
@@ -818,19 +843,36 @@ class UIListPanelRigCollection(bpy.types.Panel):
                     row = box.row()
                     row.operator('object.rig_create_perspective_camera', text='Create Camera', icon='CAMERA_DATA')
             
-            # Resolution settings (compact: label left, stacked X/Y right)
-            split = box.split(factor=0.5, align=True)
+            # Resolution section
+            res_box = box.box()
+            res_box.label(text='Resolution', icon='IMAGE_DATA')
+            split = res_box.split(factor=0.45, align=True)
             split.label(text='Render Resolution:')
             col_res = split.column(align=True)
             col_res.enabled = (item.rig_type == 'EQUIRECT_360')
             col_res.prop(item, 'render_resolution', index=0, text='X')
             col_res.prop(item, 'render_resolution', index=1, text='Y')
             
-            row = box.row()
-            row.prop(item, 'start_frame')
-            row.prop(item, 'end_frame')
-            row = box.row()
-            row.prop(item, 'frame_step')
+            # Frames section
+            frames_box = box.box()
+            frames_box.label(text='Frames', icon='SEQUENCE')
+            rowf = frames_box.row(align=True)
+            rowf.prop(item, 'start_frame', text='Start')
+            rowf.prop(item, 'end_frame', text='End')
+            rowf.prop(item, 'frame_step', text='Step')
+
+            # Flags section
+            flags_box = box.box()
+            flags_box.label(text='Flags', icon='SETTINGS')
+            flags_grid = flags_box.grid_flow(row_major=True, columns=2, even_columns=True, align=True)
+            flags_grid.prop(item, 'include_in_json')
+            flags_grid.prop(item, 'do_render')
+            exif_cell = flags_grid.column()
+            exif_cell.enabled = (item.rig_type == 'EQUIRECT_360')
+            exif_cell.prop(item, 'write_exif')
+            comp_cell = flags_grid.column()
+            comp_cell.enabled = (item.rig_type == 'PERSPECTIVE')
+            comp_cell.prop(item, 'use_compositor_media')
 
 
         else:
@@ -865,6 +907,11 @@ def register():
         description='Automatically set the selected camera as the active scene camera',
         default=True
     )
+    bpy.types.Scene.cancel_rig_render = bpy.props.BoolProperty(
+        name='Cancel Render',
+        description='Set to True to cancel the ongoing batch render gracefully',
+        default=False
+    )
 
     bpy.app.handlers.depsgraph_update_post.append(update_collection_num_cameras)
     bpy.app.handlers.depsgraph_update_post.append(selected_camera_to_active)
@@ -881,6 +928,7 @@ def unregister():
     del bpy.types.Scene.rig_index
     del bpy.types.Scene.max_rig_ID
     del bpy.types.Scene.sel_cam_active
+    del bpy.types.Scene.cancel_rig_render
 
     bpy.app.handlers.depsgraph_update_post.remove(update_collection_num_cameras)
     bpy.app.handlers.depsgraph_update_post.remove(selected_camera_to_active)
