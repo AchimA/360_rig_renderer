@@ -907,11 +907,6 @@ def register():
         description='Automatically set the selected camera as the active scene camera',
         default=True
     )
-    bpy.types.Scene.cancel_rig_render = bpy.props.BoolProperty(
-        name='Cancel Render',
-        description='Set to True to cancel the ongoing batch render gracefully',
-        default=False
-    )
 
     bpy.app.handlers.depsgraph_update_post.append(update_collection_num_cameras)
     bpy.app.handlers.depsgraph_update_post.append(selected_camera_to_active)
@@ -928,7 +923,6 @@ def unregister():
     del bpy.types.Scene.rig_index
     del bpy.types.Scene.max_rig_ID
     del bpy.types.Scene.sel_cam_active
-    del bpy.types.Scene.cancel_rig_render
 
     bpy.app.handlers.depsgraph_update_post.remove(update_collection_num_cameras)
     bpy.app.handlers.depsgraph_update_post.remove(selected_camera_to_active)

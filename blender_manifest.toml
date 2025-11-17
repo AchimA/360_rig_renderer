@@ -3,7 +3,7 @@ schema_version = "1.0.0"
 # Example of manifest file for a Blender extension
 # Change the values according to your extension
 id = "colmap_rig_addon"
-version = "0.2.1"
+version = "0.3.0"
 name = "COLMAP Rig Export & Batch Render"
 tagline = "Export COLMAP rig JSON and batch-render per-camera frames"
 maintainer = "Achim A."
@@ -30,7 +30,7 @@ license = [
 # Optional: required by some licenses.
 copyright = [
   "2024-2025 Achim A.",
-  "piexif library: Copyright (c) 2014, 2015 hMatoba (MIT License)",
+  "2014-2015 hMatoba (piexif library, MIT License)",
 ]
 
 # # Optional: list of supported platforms. If omitted, the extension will be available in all operating systems.
