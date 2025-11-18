@@ -224,5 +224,5 @@ This extension bundles the following third-party libraries:
 
 # Issues / ToDO (prob. many more than listed here)
 - [ ] User can delete collections and potentially break some functionality
-- [ ] Image sequences are imported sparse. Make sure to set the Frame Step' so that only frames with images are actually rendered.
+- [ ] Image sequences are imported **sparse**. Make sure to set the Frame Step' so that only frames with images are actually rendered.
 - [x] implement a 'per camera' resolution. Current work around is to adjust the resolution and render in 'sub-sets'
