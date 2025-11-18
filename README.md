@@ -68,7 +68,9 @@ Tip: Use the list toggles to include a rig in JSON and/or render. Projected fram
 - Perspective rigs: Does not write EXIF by design (avoids misleading metadata for downstream tools), regardless of the toggle.
 - Format note: EXIF is only embedded for `JPEG`; other formats (PNG/EXR/TIFF) do not receive EXIF.
 
-## Minimal rig_config.json Example
+<details>
+<summary><h2>Minimal rig_config.json Example</h2></summary>
+
 Below is an illustrative example of the exported structure for one Equirect rig (two cameras) and one Perspective rig (single camera). Camera transforms are relative to the rig; the first visible camera in a rig is the reference sensor.
 
 ```json
@@ -104,8 +106,11 @@ Notes:
 - `ref_sensor` marks the reference camera of the rig; other cameras may include relative rotation (w,x,y,z) and translation (x,y,z).
 - Field names and presence may evolve; treat this as a minimal guide rather than a strict schema.
 
-## COLMAP / GLOMAP Command Cheat Sheet (PowerShell)
-Aligned with the provided `SparseWorkflow.ps1`. Adjust paths and options to your setup.
+</details>
+
+<details>
+<summary><h2>COLMAP / GLOMAP Workflow (PowerShell)</h2></summary>
+Example `Workflow.ps1`. Adjust paths and options to your setup.
 
 ```powershell
 # Set your project and images
@@ -122,54 +127,94 @@ mkdir (Split-Path $Sparse0) -Force | Out-Null
 
 # 1) Feature extraction (treat each camera folder as a separate sensor)
 # Camera model examples: SIMPLE_PINHOLE | PINHOLE | RADIAL | OPENCV | FULL_OPENCV ...
-colmap feature_extractor `
-  --database_path "$DB" `
-  --image_path "$Images" `
-  --ImageReader.camera_model RADIAL `
-  --ImageReader.single_camera_per_folder 1 `
-  --SiftExtraction.estimate_affine_shape=true `
-  --SiftExtraction.domain_size_pooling=true
+$featureParams = @{
+    database_path = $DB
+    image_path = $Images
+    'ImageReader.camera_model' = 'RADIAL'
+    'ImageReader.single_camera_per_folder' = 1
+    'SiftExtraction.estimate_affine_shape' = $true
+    'SiftExtraction.domain_size_pooling' = $true
+}
+colmap feature_extractor @featureParams
 
 # 2) Rig configurator (applies rig_config.json to the database; optional but recommended)
 if (Test-Path $RigCfg) {
-  colmap rig_configurator `
-    --database_path "$DB" `
-    --rig_config_path "$RigCfg"
+    $rigParams = @{
+        database_path = $DB
+        rig_config_path = $RigCfg
+    }
+    colmap rig_configurator @rigParams
 }
 
 # 3) Matching (pick ONE)
 # Exhaustive (small datasets)
-colmap exhaustive_matcher --database_path "$DB" --FeatureMatching.guided_matching=1
+$matchParams = @{
+    database_path = $DB
+    'FeatureMatching.guided_matching' = 1
+}
+colmap exhaustive_matcher @matchParams
 
 # OR Sequential (video/temporal)
-# colmap sequential_matcher --database_path "$DB" --FeatureMatching.guided_matching=1 --SequentialMatching.loop_detection=1 --SequentialMatching.loop_detection_period=10
+# $matchParams = @{
+#     database_path = $DB
+#     'FeatureMatching.guided_matching' = 1
+#     'SequentialMatching.loop_detection' = 1
+#     'SequentialMatching.loop_detection_period' = 10
+# }
+# colmap sequential_matcher @matchParams
 
 # OR Vocab Tree (large datasets; requires a vocab tree file)
-# colmap vocab_tree_matcher --database_path "$DB" --FeatureMatching.guided_matching=true --VocabTreeMatching.vocab_tree_path "D:\\path\\to\\vocab_tree.bin"
+# $matchParams = @{
+#     database_path = $DB
+#     'FeatureMatching.guided_matching' = $true
+#     'VocabTreeMatching.vocab_tree_path' = 'D:\path\to\vocab_tree.bin'
+# }
+# colmap vocab_tree_matcher @matchParams
 
-# 4) Global mapping with GLOMAP
-glomap mapper `
-  --database_path "$DB" `
-  --image_path "$Images" `
-  --output_path "$SparseU"
+# 4) Mapping (pick ONE)
+# Global mapping with GLOMAP (fast, recommended)
+$mapperParams = @{
+    database_path = $DB
+    image_path = $Images
+    output_path = $SparseU
+}
+glomap mapper @mapperParams
+
+# OR Incremental mapping with COLMAP (slower, more robust for complex scenes)
+# colmap mapper @mapperParams
 
 # 5) Orientation alignment (COLMAP)
-colmap model_orientation_aligner `
-  --input_path (Join-Path $SparseU '0') `
-  --output_path "$Sparse0" `
-  --image_path "$Images"
+$alignParams = @{
+    input_path = (Join-Path $SparseU '0')
+    output_path = $Sparse0
+    image_path = $Images
+}
+colmap model_orientation_aligner @alignParams
 
 # (Optional) Undistort if needed for downstream tools/viewers
-# colmap image_undistorter --image_path "$Images" --input_path "$Sparse0" --output_path "$Sparse0" --output_type COLMAP
+# $undistortParams = @{
+#     image_path = $Images
+#     input_path = $Sparse0
+#     output_path = $Sparse0
+#     output_type = 'COLMAP'
+# }
+# colmap image_undistorter @undistortParams
 
 # (Optional) Launch GUI to inspect results
-# colmap gui --database_path "$DB" --import_path "$Sparse0" --image_path "$Images"
+# $guiParams = @{
+#     database_path = $DB
+#     import_path = $Sparse0
+#     image_path = $Images
+# }
+# colmap gui @guiParams
 ```
 
 Notes:
 - Use `--ImageReader.single_camera_per_folder 1` so each `{Rig}/{Camera}` folder acts as a separate sensor; `rig_configurator` then enforces rig constraints from `rig_config.json`.
 - Prefer Exhaustive for small sets; Sequential for continuous video; Vocab Tree for large sets (requires a vocab tree file).
 - This flow mirrors `SparseWorkflow.ps1` (feature → rig_configurator → match → GLOMAP mapper → orientation align). Dense reconstruction is intentionally omitted here.
+
+</details>
 
 ## Current Restrictions
 Please don't rename or delete the collections that are handled by the extension. I currently couldn't figure out a way to prevent the user from messing with this.
