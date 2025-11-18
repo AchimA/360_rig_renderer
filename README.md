@@ -127,86 +127,80 @@ mkdir (Split-Path $Sparse0) -Force | Out-Null
 
 # 1) Feature extraction (treat each camera folder as a separate sensor)
 # Camera model examples: SIMPLE_PINHOLE | PINHOLE | RADIAL | OPENCV | FULL_OPENCV ...
-$featureParams = @{
-    database_path = $DB
-    image_path = $Images
-    'ImageReader.camera_model' = 'RADIAL'
-    'ImageReader.single_camera_per_folder' = 1
-    'SiftExtraction.estimate_affine_shape' = $true
-    'SiftExtraction.domain_size_pooling' = $true
-}
-colmap feature_extractor @featureParams
+colmap feature_extractor (
+    '--database_path', $DB,
+    '--image_path', $Images,
+    '--ImageReader.camera_model', 'RADIAL',
+    '--ImageReader.single_camera_per_folder', '1',
+    '--SiftExtraction.estimate_affine_shape', '1',
+    '--SiftExtraction.domain_size_pooling', '1'
+)
 
 # 2) Rig configurator (applies rig_config.json to the database; optional but recommended)
 if (Test-Path $RigCfg) {
-    $rigParams = @{
-        database_path = $DB
-        rig_config_path = $RigCfg
-    }
-    colmap rig_configurator @rigParams
+    colmap rig_configurator (
+        '--database_path', $DB,
+        '--rig_config_path', $RigCfg
+    )
 }
 
 # 3) Matching (pick ONE)
 # Exhaustive (small datasets)
-$matchParams = @{
-    database_path = $DB
-    'FeatureMatching.guided_matching' = 1
-}
-colmap exhaustive_matcher @matchParams
+colmap exhaustive_matcher (
+    '--database_path', $DB,
+    '--FeatureMatching.guided_matching', '1'
+)
 
 # OR Sequential (video/temporal)
-# $matchParams = @{
-#     database_path = $DB
-#     'FeatureMatching.guided_matching' = 1
-#     'SequentialMatching.loop_detection' = 1
-#     'SequentialMatching.loop_detection_period' = 10
-# }
-# colmap sequential_matcher @matchParams
+# colmap sequential_matcher (
+#     '--database_path', $DB,
+#     '--FeatureMatching.guided_matching', '1',
+#     '--SequentialMatching.loop_detection', '1',
+#     '--SequentialMatching.loop_detection_period', '10'
+# )
 
 # OR Vocab Tree (large datasets; requires a vocab tree file)
-# $matchParams = @{
-#     database_path = $DB
-#     'FeatureMatching.guided_matching' = $true
-#     'VocabTreeMatching.vocab_tree_path' = 'D:\path\to\vocab_tree.bin'
-# }
-# colmap vocab_tree_matcher @matchParams
+# colmap vocab_tree_matcher (
+#     '--database_path', $DB,
+#     '--FeatureMatching.guided_matching', '1'
+# )
 
 # 4) Mapping (pick ONE)
 # Global mapping with GLOMAP (fast, recommended)
-$mapperParams = @{
-    database_path = $DB
-    image_path = $Images
-    output_path = $SparseU
-}
-glomap mapper @mapperParams
+# glomap mapper (
+#     '--database_path', $DB,
+#     '--image_path', $Images,
+#     '--output_path', $SparseU
+# )
 
 # OR Incremental mapping with COLMAP (slower, more robust for complex scenes)
-# colmap mapper @mapperParams
+colmap mapper (
+    '--database_path', $DB,
+    '--image_path', $Images,
+    '--output_path', $SparseU
+)
 
 # 5) Orientation alignment (COLMAP)
-$alignParams = @{
-    input_path = (Join-Path $SparseU '0')
-    output_path = $Sparse0
-    image_path = $Images
-}
-colmap model_orientation_aligner @alignParams
+colmap model_orientation_aligner (
+    '--input_path', (Join-Path $SparseU '0'),
+    '--output_path', $Sparse0,
+    '--image_path', $Images
+)
 
 # (Optional) Undistort if needed for downstream tools/viewers
-# $undistortParams = @{
-#     image_path = $Images
-#     input_path = $Sparse0
-#     output_path = $Sparse0
-#     output_type = 'COLMAP'
-# }
-# colmap image_undistorter @undistortParams
+# colmap image_undistorter (
+#     '--image_path', $Images,
+#     '--input_path', $Sparse0,
+#     '--output_path', $Sparse0,
+#     '--output_type', 'COLMAP'
+# )
 
 # (Optional) Launch GUI to inspect results
-# $guiParams = @{
-#     database_path = $DB
-#     import_path = $Sparse0
-#     image_path = $Images
-# }
-# colmap gui @guiParams
+# colmap gui (
+#     '--database_path', $DB,
+#     '--import_path', $Sparse0,
+#     '--image_path', $Images
+# )
 ```
 
 Notes:
