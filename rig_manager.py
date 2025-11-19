@@ -653,15 +653,15 @@ class RIG_OT_actions(bpy.types.Operator):
     '''Move rig items up and down, add and remove'''
     bl_idname = 'object.rig_action'
     bl_label = 'RIG Actions'
-    bl_description = 'Move rig items up and down, add and remove'
+    bl_description = 'Add, remove & reorder rigs'
     bl_options = {'REGISTER'}
 
     action: bpy.props.EnumProperty(
         items=(
-            ('UP', 'Up', ''),
-            ('DOWN', 'Down', ''),
-            ('REMOVE', 'Remove', ''),
-            ('ADD', 'Add', '')))
+            ('UP', 'Move Up', ''),
+            ('DOWN', 'Move Down', ''),
+            ('REMOVE', 'Remove Rig', ''),
+            ('ADD', 'Add Rig', '')))
 
     def invoke(self, context, event):
         scn = context.scene
@@ -776,11 +776,11 @@ class UIListPanelRigCollection(bpy.types.Panel):
         row.template_list('RIG_UL_LIST', 'a list', scene, 'rig_collection', scene, 'rig_index', rows=rows)
 
         col = row.column(align=True)
-        col.operator('object.rig_action', icon='ZOOM_IN', text='').action = 'ADD'
-        col.operator('object.rig_action', icon='ZOOM_OUT', text='').action = 'REMOVE'
+        col.operator('object.rig_action', icon='EVENT_PLUS', text='').action = 'ADD'
+        col.operator('object.rig_action', icon='EVENT_MINUS', text='').action = 'REMOVE'
         col.separator()
-        col.operator('object.rig_action', icon='TRIA_UP', text='').action = 'UP'
-        col.operator('object.rig_action', icon='TRIA_DOWN', text='').action = 'DOWN'
+        col.operator('object.rig_action', icon='EVENT_UP_ARROW', text='').action = 'UP'
+        col.operator('object.rig_action', icon='EVENT_DOWN_ARROW', text='').action = 'DOWN'
         #####################################
         row = layout.row()
         row.prop(scene, 'sel_cam_active', text='Auto-activate selected camera')
